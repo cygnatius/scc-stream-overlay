@@ -6,18 +6,25 @@ Code in the repo root and start from here.
 ## What this is
 
 A broadcast overlay for streaming Shepparton Chess Club games. It's a single
-self-contained HTML file loaded as an **OBS Browser Source** (1920×1080). It
-renders the live board, move list, clocks and player cards, themed to match
-`sheppartonchess.club`.
+self-contained HTML file — `scc-stream-overlay.html` — loaded as an **OBS
+Browser Source** (1920×1080). It renders the live board, move list, clocks and
+player cards, themed to match `sheppartonchess.club`.
 
-There are two variants:
+**One file, one toggle.** `CONFIG.pairingsman.enabled` chooses where the
+player/event data comes from:
 
-- `overlays/overlay-manual.html` — **no external accounts.** You type the
-  players/event into the `STATE` block; the board/moves/clocks come from DGT
-  LiveChess. This is the one currently working live.
-- `overlays/overlay-pairingsman.html` — same overlay, but pulls names, ratings,
-  round, tournament and records from the Pairingsman v1 API instead of typing
-  them. Holds a bearer token — keep it out of public git.
+- `false` (default) — **manual, no external accounts.** You type the
+  players/event into the `STATE` block. No secrets in the file.
+- `true` — pulls names, ratings, round, tournament and records from the
+  Pairingsman v1 API instead (needs `token` + `meetingId`; keep the token out of
+  public git).
+
+Either way the board/moves/clocks come live from DGT LiveChess, clocks tick
+locally and re-sync on change, and a sponsor area (0/1/many logos, rotating if
+several — via `STATE.sponsors`) sits under the move list.
+
+(Earlier there were two separate files, `overlay-manual.html` and
+`overlay-pairingsman.html`; they've been consolidated into this one.)
 
 ## Architecture
 
@@ -70,26 +77,27 @@ Three independent systems the overlay ties together:
 
 ## Current status
 
-- Manual overlay **working live** on the test setup: board mirrors the DGT board,
+- Manual mode **working live** on the test setup: board mirrors the DGT board,
   move list builds, clock ticks and syncs. Verified with LiveChess at
   `192.168.0.92:1982`.
+- **Player + moves reworked**: the two player cards now flank the board (Black
+  above, White below) and the move list runs the full height of the right
+  column.
+- **Sponsor area** added under the moves (`STATE.sponsors`: 0 hides it, 1 is
+  static, many auto-rotate).
+- **Consolidated to one file** with the `pairingsman.enabled` toggle; the
+  ticking-clock fix now lives in that single file (was open task #3).
 
 ## Open tasks
 
-1. **Sponsor logo area** — add a reserved slot (placement TBD with Hayden:
-   footer bar / panel under the moves / bottom band / rotating).
-2. **Rework the player + moves section** — Hayden wants to rearrange it
-   significantly; get the specifics before building.
-3. **Mirror the ticking-clock fix** (local tick + sync-on-change) into
-   `overlay-pairingsman.html` — currently only in the manual overlay.
-4. **Finalise the Pairingsman "record" field** — mapping is a best-guess
+1. **Finalise the Pairingsman "record" field** — mapping is a best-guess
    (`points`/`games`); confirm against a real `/tournaments/{id}/standings`
    response and fix the field names.
-5. **Confirm the exact LiveChess `clock` field shape** and adjust `lcClockSec`
+2. **Confirm the exact LiveChess `clock` field shape** and adjust `lcClockSec`
    if needed (currently handles string `H:MM:SS` or numeric ms/seconds).
-6. **Bundle chess.js locally** for offline reliability at venues.
-7. Keep the two overlays in sync as shared code — consider extracting the common
-   JS so fixes land once.
+3. **Bundle chess.js locally** for offline reliability at venues.
+4. **Verify the consolidated file on the real venue setup** (LiveChess + OBS) in
+   both toggle states — it's only been checked in the dev browser so far.
 
 ## Testing reality
 
@@ -99,6 +107,6 @@ verify. Console (F12) on the OBS/browser machine is the debugging surface.
 
 ## Kickoff line for Claude Code
 
-> Read PROJECT-BRIEF.md and README.md. The manual overlay works; next I want to
-> [add the sponsor area / rework the player+moves section — I'll describe it].
-> Keep the two overlays consistent and don't commit my Pairingsman token.
+> Read PROJECT-BRIEF.md and README.md. The overlay works in manual mode; next I
+> want to [describe the change]. It's one file with a `pairingsman.enabled`
+> toggle — keep both modes working and don't commit my Pairingsman token.

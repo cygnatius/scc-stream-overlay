@@ -1,29 +1,31 @@
 # Shepparton Chess Club — Stream Overlay
 
 Broadcast overlay for streaming club chess games. A single self-contained HTML
-file loaded as an **OBS Browser Source** (1920×1080). It renders the live board,
-move list, clocks and player cards, themed to the club site, with the live game
-coming from **DGT LiveChess** and (optionally) player/tournament data from
-**Pairingsman**.
+file — `scc-stream-overlay.html` — loaded as an **OBS Browser Source**
+(1920×1080). It renders the live board, move list, clocks and player cards,
+themed to the club site, with the live game coming from **DGT LiveChess**.
 
-## Two overlays
+Player/event data comes from one of two sources, chosen by a single toggle:
 
-| File | Data source for players/event | Needs a token |
-|------|-------------------------------|---------------|
-| `overlays/overlay-manual.html` | You type them into the `STATE` block | No |
-| `overlays/overlay-pairingsman.html` | Pairingsman v1 API | Yes (keep private) |
+| `pairingsman.enabled` | Where players / round / record come from | Needs a token |
+|-----------------------|-------------------------------------------|---------------|
+| `false` (default) | You type them into the `STATE` block | No |
+| `true` | Pairingsman v1 API (auto-filled) | Yes (keep private) |
 
-Both get the board / moves / clocks live from DGT LiveChess.
+Either way, the board / moves / clocks come live from DGT LiveChess, and a
+sponsor area (0, 1, or many logos — rotating if several) sits under the moves.
 
 ## Quick start (OBS)
 
-1. In OBS: **Sources → + → Browser**, tick **Local file**, choose an overlay,
-   set **1920×1080**.
+1. In OBS: **Sources → + → Browser**, tick **Local file**, choose
+   `scc-stream-overlay.html`, set **1920×1080**.
 2. Open the file in a text editor and fill the `CONFIG` block near the bottom:
    - `livechess.host` — the LiveChess PC's address. Same PC as OBS →
      `127.0.0.1:1982`; different PC → its LAN IP, e.g. `192.168.0.92:1982`.
-   - (Pairingsman variant) `pairingsman.token`, `meetingId`.
-3. For the manual overlay, also type the players/event in the `STATE` block.
+   - `pairingsman.enabled` — leave `false` to type players by hand; set `true`
+     (and fill `token` + `meetingId`) to auto-fill from Pairingsman.
+3. In manual mode (`enabled:false`), type the players/event in the `STATE` block.
+   Add sponsor logos to the `STATE.sponsors` array (empty = no sponsor panel).
 4. Save, then right-click the source → **Refresh**.
 
 Full walkthroughs are in `docs/`.
@@ -37,8 +39,9 @@ Full walkthroughs are in `docs/`.
 
 ## Important constraints
 
-- **Don't commit the Pairingsman token.** Keep this repo private, or keep the
-  token in a git-ignored `config.local.js`. The manual overlay has no secrets.
+- **Don't commit the Pairingsman token.** Only matters once you set
+  `pairingsman.enabled:true` and fill in a `token`. Keep this repo private, or
+  keep the token out of git. With the toggle off, the file has no secrets.
 - **Don't serve the live overlay from GitHub Pages.** An HTTPS page can't open an
   insecure `ws://` connection to LiveChess. Git is for managing the files; OBS
   loads them as local files.

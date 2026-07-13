@@ -43,9 +43,9 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);
 
 .stage{position:relative;width:1920px;height:1080px;flex:none;
   transform-origin:center center;background:var(--bg);display:grid;
-  grid-template-rows:96px 1fr 66px;
+  grid-template-rows:84px 1fr 56px;
   grid-template-columns:1fr;
-  padding:26px 34px;gap:20px}
+  padding:20px 34px;gap:16px}
 
 /* ---------- angled parchment banner (site signature element) ---------- */
 .banner{position:relative;display:inline-flex;align-items:center;
@@ -77,10 +77,10 @@ header{grid-row:1;display:flex;align-items:center;justify-content:space-between}
   padding:4px 14px;border-radius:3px}
 
 /* ===================== MAIN ===================== */
-main{grid-row:2;display:grid;grid-template-columns:824px 1fr;gap:28px;min-height:0}
+main{grid-row:2;display:grid;grid-template-columns:824px 1fr;gap:24px;min-height:0}
 
-/* ---- board column ---- */
-.boardwrap{display:flex;flex-direction:column;justify-content:flex-start;gap:14px;min-height:0}
+/* ---- board column: Black card · board · White card ---- */
+.boardwrap{display:flex;flex-direction:column;justify-content:center;gap:12px;min-height:0}
 .board{--n:8;position:relative;height:min(740px,100%);aspect-ratio:1/1;
   flex:0 1 auto;min-height:0;margin:0 auto;
   border:6px solid var(--cream);border-radius:6px;overflow:hidden;
@@ -102,38 +102,40 @@ main{grid-row:2;display:grid;grid-template-columns:824px 1fr;gap:28px;min-height
 .coord.rank{left:5px;top:3px}
 .coord.on-light{color:#6B4B39}.coord.on-dark{color:#E7D6B4}
 
-/* ---- right column ---- */
-.side{display:flex;flex-direction:column;gap:18px;min-height:0}
+/* ---- right column: moves + sponsors ---- */
+.side{display:flex;flex-direction:column;gap:16px;min-height:0}
 
-/* player card */
-.pcard{background:var(--panel);border:1px solid rgba(241,231,211,.14);
-  border-radius:10px;padding:16px 18px;display:grid;
-  grid-template-columns:84px 1fr auto;grid-template-rows:auto auto;
-  column-gap:16px;row-gap:6px;align-items:center;position:relative;overflow:hidden}
+/* player card — slim horizontal bar that flanks the board (top=Black, bottom=White) */
+.pcard{flex:none;background:var(--panel);border:1px solid rgba(241,231,211,.14);
+  border-radius:10px;padding:7px 16px;display:grid;
+  grid-template-columns:48px 1fr auto;column-gap:14px;
+  align-items:center;position:relative;overflow:hidden}
 .pcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--cream)}
 .pcard.active::before{background:var(--gold)}
 .pcard.active{box-shadow:0 0 0 2px var(--gold) inset,0 10px 24px rgba(0,0,0,.35)}
-.avatar{grid-row:1 / span 2;width:84px;height:84px;border-radius:8px;
+.avatar{width:48px;height:48px;border-radius:8px;
   background:var(--panel-2);border:2px solid var(--cream);overflow:hidden;
   display:grid;place-items:center;font-family:'Playfair Display',serif;
-  font-weight:800;font-size:34px;color:var(--cream-dim)}
+  font-weight:800;font-size:20px;color:var(--cream-dim)}
 .avatar img{width:100%;height:100%;object-fit:cover}
-.pname{font-family:var(--display);font-weight:800;font-size:30px;
-  line-height:1.05;display:flex;align-items:center;gap:12px}
-.ptitle{font-size:15px;font-weight:800;color:var(--bg);background:var(--gold);
-  padding:2px 8px;border-radius:3px;letter-spacing:.05em}
-.pmeta{display:flex;align-items:center;gap:18px;font-size:16px;color:var(--cream-dim)}
+.pinfo{min-width:0;display:flex;flex-direction:column;gap:3px}
+.pname{font-family:var(--display);font-weight:800;font-size:25px;
+  line-height:1.0;display:flex;align-items:center;gap:10px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ptitle{font-size:13px;font-weight:800;color:var(--bg);background:var(--gold);
+  padding:2px 7px;border-radius:3px;letter-spacing:.05em}
+.pmeta{display:flex;align-items:center;gap:16px;font-size:14px;color:var(--cream-dim)}
 .pmeta b{color:var(--cream);font-weight:700}
 .pmeta .rec{color:var(--gold);font-weight:800}
-.clock{grid-row:1 / span 2;justify-self:end;align-self:center;
+.clock{justify-self:end;align-self:center;
   font-family:'Figtree',sans-serif;font-variant-numeric:tabular-nums;
-  font-weight:800;font-size:44px;letter-spacing:.02em;
+  font-weight:800;font-size:35px;letter-spacing:.02em;
   background:var(--panel-2);color:var(--cream);
-  padding:8px 18px;border-radius:8px;min-width:186px;text-align:center;
+  padding:5px 16px;border-radius:8px;min-width:166px;text-align:center;
   border:1px solid rgba(241,231,211,.12)}
 .pcard.active .clock{background:var(--gold);color:var(--bg-deep)}
 .clock.low{color:#e7a; }
-.flag{font-size:22px}
+.flag{font-size:20px}
 
 /* moves */
 .moves{flex:1;min-height:0;background:var(--panel);
@@ -144,13 +146,30 @@ main{grid-row:2;display:grid;grid-template-columns:824px 1fr;gap:28px;min-height
 .moves .cap .t{font-family:var(--word);font-weight:700;
   letter-spacing:.14em;text-transform:uppercase;font-size:16px;color:var(--cream)}
 .moves .cap .st{font-family:var(--word);font-size:13px;color:var(--gold);font-weight:600;letter-spacing:.12em;text-transform:uppercase}
-.mlist{flex:1;overflow:hidden;padding:6px 10px;
-  display:grid;grid-template-columns:44px 1fr 1fr;
-  align-content:start;gap:2px 6px;font-size:19px;
+.mlist{flex:1;overflow:hidden;padding:10px 16px;
+  display:grid;grid-template-columns:52px 150px 150px;justify-content:center;
+  align-content:start;gap:4px 10px;font-size:22px;
   font-variant-numeric:tabular-nums}
-.mno{color:var(--cream-dim);text-align:right;padding:5px 6px;font-weight:700}
-.mv{padding:5px 10px;border-radius:5px;font-weight:600}
+.mno{color:var(--cream-dim);text-align:right;padding:6px 8px;font-weight:700}
+.mv{padding:6px 12px;border-radius:5px;font-weight:600}
 .mv.cur{background:var(--gold);color:var(--bg-deep);font-weight:800}
+
+/* ---- sponsors (right column, under the moves) — 0 / 1 / many ---- */
+.sponsors{flex:none;background:var(--panel);
+  border:1px solid rgba(241,231,211,.14);border-radius:10px;
+  display:flex;flex-direction:column;overflow:hidden}
+.sponsors[hidden]{display:none}   /* author display:flex would otherwise defeat [hidden] */
+.sponsors .cap{padding:10px 16px 8px;border-bottom:1px solid rgba(241,231,211,.12)}
+.sponsors .cap .t{font-family:var(--word);font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;font-size:15px;color:var(--cream)}
+.slogo{position:relative;flex:1;min-height:132px;margin:12px;border-radius:8px;
+  background:var(--cream);display:grid;place-items:center;overflow:hidden}
+.slogo .item{position:absolute;inset:16px;display:grid;place-items:center;
+  opacity:0;transition:opacity .6s ease}
+.slogo .item.show{opacity:1}
+.slogo img{max-width:100%;max-height:100%;object-fit:contain}
+.slogo .sname{color:var(--ink);font-family:var(--display);font-weight:800;
+  font-size:30px;text-align:center;letter-spacing:.01em;padding:0 10px}
 
 /* ===================== FOOTER ===================== */
 footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
@@ -189,39 +208,48 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 
   <!-- ============ MAIN ============ -->
   <main>
-    <!-- board -->
+    <!-- board column: Black (top) · board · White (bottom) -->
     <div class="boardwrap">
-      <div class="board" id="board"></div>
-    </div>
-
-    <!-- right column -->
-    <div class="side">
       <!-- top player (Black) -->
       <div class="pcard" id="cardBlack">
         <div class="avatar" id="avBlack"></div>
-        <div class="pname"><span id="nmBlack">—</span><span class="ptitle" id="tiBlack" hidden></span></div>
-        <div class="pmeta">
-          <span>Rating <b id="rtBlack">—</b></span>
-          <span>Record <span class="rec" id="rcBlack">—</span></span>
+        <div class="pinfo">
+          <div class="pname"><span id="nmBlack">—</span><span class="ptitle" id="tiBlack" hidden></span></div>
+          <div class="pmeta">
+            <span>Rating <b id="rtBlack">—</b></span>
+            <span>Record <span class="rec" id="rcBlack">—</span></span>
+          </div>
         </div>
         <div class="clock" id="clkBlack">—:—:—</div>
       </div>
 
-      <!-- moves -->
+      <div class="board" id="board"></div>
+
+      <!-- bottom player (White) -->
+      <div class="pcard active" id="cardWhite">
+        <div class="avatar" id="avWhite"></div>
+        <div class="pinfo">
+          <div class="pname"><span id="nmWhite">—</span><span class="ptitle" id="tiWhite" hidden></span></div>
+          <div class="pmeta">
+            <span>Rating <b id="rtWhite">—</b></span>
+            <span>Record <span class="rec" id="rcWhite">—</span></span>
+          </div>
+        </div>
+        <div class="clock" id="clkWhite">—:—:—</div>
+      </div>
+    </div>
+
+    <!-- right column: moves + sponsors -->
+    <div class="side">
       <div class="moves">
         <div class="cap"><span class="t">Moves</span><span class="st" id="mvStatus">Black to move</span></div>
         <div class="mlist" id="mlist"></div>
       </div>
 
-      <!-- bottom player (White) -->
-      <div class="pcard active" id="cardWhite">
-        <div class="avatar" id="avWhite"></div>
-        <div class="pname"><span id="nmWhite">—</span><span class="ptitle" id="tiWhite" hidden></span></div>
-        <div class="pmeta">
-          <span>Rating <b id="rtWhite">—</b></span>
-          <span>Record <span class="rec" id="rcWhite">—</span></span>
-        </div>
-        <div class="clock" id="clkWhite">—:—:—</div>
+      <!-- sponsor area: hidden when STATE.sponsors is empty -->
+      <div class="sponsors" id="sponsors" hidden>
+        <div class="cap"><span class="t">Proudly supported by</span></div>
+        <div class="slogo" id="slogo"></div>
       </div>
     </div>
   </main>
@@ -241,10 +269,11 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 <script>
 /* =========================================================================
-   LIVE STATE  —  everything the overlay shows comes from here.
-   To go live, feed this object from the wiring hooks at the bottom and call
-   render().  Right now it holds a demo game (Ruy López, after 3.Bb5) so the
-   overlay renders immediately for design review.
+   STATE  —  the players / event you type by hand (MANUAL mode).
+   These values are shown as-is when Pairingsman is OFF, and act as the
+   fallback until the first poll when Pairingsman is ON (see CONFIG below:
+   set pairingsman.enabled=true to auto-fill names/ratings/round/record).
+   The board / moves / clocks always come live from DGT LiveChess.
    ========================================================================= */
 const STATE = {
   venue: "Shepparton Mechanics Institute",
@@ -267,6 +296,16 @@ const STATE = {
     rating:1802, record:"4 / 4",
     clock:"0:58:07", avatar:"",
   },
+
+  /* sponsors: 0, 1, or many. Empty array hides the panel (moves fill the column);
+     one entry shows a fixed logo; several auto-rotate. Each entry is either
+     "https://example.com/logo.png" or { name:"Acme", img:"https://…/acme.png" }.
+     Logos sit on a cream tile, so transparent-PNG or dark logos look best. */
+  sponsors: [
+    // "https://example.com/sponsor-1.png",
+    // { name:"Your Sponsor Here" },
+  ],
+  sponsorRotateMs: 8000,
 };
 
 /* ---- board rendering -------------------------------------------------- */
@@ -329,6 +368,37 @@ function renderMoves(){
   el.scrollTop = el.scrollHeight;
 }
 
+/* ---- sponsors --------------------------------------------------------- */
+/* Reads STATE.sponsors (0/1/many). Empty -> panel hidden. One -> static.     */
+/* Many -> cross-fade rotation every STATE.sponsorRotateMs. Call once at boot. */
+let SP_TIMER=null, SP_IDX=0;
+function sponsorItem(s){ return (typeof s==="string") ? {img:s} : (s||{}); }
+function renderSponsors(){
+  const panel=document.getElementById("sponsors");
+  const box=document.getElementById("slogo");
+  const list=Array.isArray(STATE.sponsors)?STATE.sponsors.filter(Boolean):[];
+  if(SP_TIMER){ clearInterval(SP_TIMER); SP_TIMER=null; }
+  box.innerHTML="";
+  if(list.length===0){ panel.hidden=true; return; }   // no sponsors -> moves fill the column
+  panel.hidden=false;
+  list.forEach((s,i)=>{
+    const it=sponsorItem(s);
+    const d=document.createElement("div"); d.className="item"+(i===0?" show":"");
+    if(it.img){ const im=document.createElement("img"); im.src=it.img; im.alt=it.name||""; d.appendChild(im); }
+    else { const n=document.createElement("div"); n.className="sname"; n.textContent=it.name||""; d.appendChild(n); }
+    box.appendChild(d);
+  });
+  SP_IDX=0;
+  if(list.length>1){                                   // rotate through the logos
+    const items=box.querySelectorAll(".item");
+    SP_TIMER=setInterval(()=>{
+      items[SP_IDX].classList.remove("show");
+      SP_IDX=(SP_IDX+1)%items.length;
+      items[SP_IDX].classList.add("show");
+    }, Math.max(2000, STATE.sponsorRotateMs||8000));
+  }
+}
+
 /* ---- player cards ----------------------------------------------------- */
 function initials(name){return name.split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();}
 function fillPlayer(side){
@@ -336,7 +406,7 @@ function fillPlayer(side){
   document.getElementById("nm"+suf).textContent=p.name||"—";
   document.getElementById("rt"+suf).textContent=p.rating||"—";
   document.getElementById("rc"+suf).textContent=p.record||"—";
-  document.getElementById("clk"+suf).textContent=p.clock||"—:—:—";
+  document.getElementById("clk"+suf).textContent = (p.sec!=null ? fmtSec(p.sec) : (p.clock||"—:—:—"));
   const ti=document.getElementById("ti"+suf);
   if(p.title){ti.textContent=p.title;ti.hidden=false;} else ti.hidden=true;
   const av=document.getElementById("av"+suf);
@@ -356,6 +426,7 @@ function render(){
   document.getElementById("cardBlack").classList.toggle("active",STATE.toMove==="b");
 }
 render();
+renderSponsors();   // sponsors are static config — build once, not on every board update
 
 /* scale the fixed 1920x1080 canvas to fit the window; OBS at 1920x1080 renders it 1:1 */
 function fitStage(){
@@ -365,19 +436,43 @@ function fitStage(){
 window.addEventListener('resize', fitStage);
 fitStage();
 
+/* ---- ticking clocks ---------------------------------------------------- */
+/* The DGT clock feed only changes at move-end, so we tick the side-to-move   */
+/* down locally every second and re-sync to the real value ONLY when it        */
+/* changes (see the LiveChess handler). In manual mode, set each player's      */
+/* starting time in STATE (e.g. clock:"1:30:00"); it switches on every move.   */
+function parseClock(s){ if(typeof s!=="string") return null; const p=s.split(":").map(Number); if(p.some(n=>isNaN(n))) return null; return p.reduce((a,n)=>a*60+n,0); }
+function fmtSec(t){ t=Math.max(0,Math.round(t)); const h=Math.floor(t/3600),m=Math.floor((t%3600)/60),s=t%60; return h+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0"); }
+function paintClocks(){
+  if(STATE.white.sec!=null) document.getElementById("clkWhite").textContent=fmtSec(STATE.white.sec);
+  if(STATE.black.sec!=null) document.getElementById("clkBlack").textContent=fmtSec(STATE.black.sec);
+}
+STATE.white.sec = parseClock(STATE.white.clock);
+STATE.black.sec = parseClock(STATE.black.clock);
+paintClocks();
+setInterval(function(){
+  const side = STATE.toMove==="w" ? STATE.white : STATE.black;
+  if(side.sec!=null && side.sec>0){ side.sec-=1; paintClocks(); }
+}, 1000);
+
 /* =========================================================================
    LIVE WIRING  —  fill CONFIG, save, reload the OBS browser source.
-   • Leave a section blank to keep it on the demo data (handy for previewing).
-   • KEEP THIS FILE PRIVATE — it holds your Pairingsman token.
-   • DGT LiveChess gives the board / moves / clocks (your LAN).
-   • Pairingsman gives names / ratings / round / tournament / result (internet).
+   • pairingsman.enabled is the MASTER TOGGLE for the Pairingsman integration.
+       false → MANUAL: the overlay shows the players you typed in STATE.
+       true  → AUTO:   names / ratings / round / tournament / record come from
+               the Pairingsman API (needs token + meetingId).
+   • Leave livechess.host blank to keep the demo board (handy for previewing).
+   • KEEP THIS FILE PRIVATE IF YOU FILL IN A TOKEN — it's a secret.
+   • DGT LiveChess gives the board / moves / clocks (your LAN), in both modes.
    ========================================================================= */
 const CONFIG = {
-  boardNumber: 1,                    // which board/table this overlay is for
+  boardNumber: 1,                    // which board/table this overlay is for (Pairingsman pairing match)
 
   pairingsman: {
+    enabled: false,                  // ◄ MASTER TOGGLE. false = manual (type players in STATE above).
+                                     //   true (+ token + meetingId) = auto-fill from Pairingsman.
     base: "https://pairingsman.com/api/v1",
-    token: "",                       // Bearer token; blank = keep demo names
+    token: "",                       // Bearer token; required when enabled
     meetingId: null,                 // tonight's meeting id, e.g. 210
     tournamentId: null,              // optional — auto-read from the pairing if null
     rosterEverySec: 10,
@@ -456,14 +551,8 @@ async function pollStandings(){
 }
 
 /* ---------- DGT LIVECHESS (board, moves, clocks) ------------------------- */
-let GAME=null, LC_SERIAL=null, LC_PENDING=null, LC_SNAP=null;
-function lcClock(v){
-  if(v==null) return null;
-  if(typeof v==="string") return v;
-  let s = v>100000 ? Math.round(v/1000) : Math.round(v);   // ms vs s heuristic
-  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), ss=s%60;
-  return h+":"+String(m).padStart(2,"0")+":"+String(ss).padStart(2,"0");
-}
+let GAME=null, LC_SERIAL=null, LC_PENDING=null, LC_SNAP=null, LC_LAST_W, LC_LAST_B;
+function lcClockSec(v){ if(v==null) return null; if(typeof v==="string") return parseClock(v); return v>100000 ? Math.round(v/1000) : Math.round(v); }
 function commitMove(m){
   STATE.moves.push(m.san);
   STATE.currentPly = STATE.moves.length-1;
@@ -512,19 +601,30 @@ function connectLiveChess(){
     if(!b) return;
     LC_SERIAL = b.serialnr || LC_SERIAL;
     if(b.board) applyPlacement(b.board);
-    if(b.clock){ const w=lcClock(b.clock.white), bl=lcClock(b.clock.black);
-                 if(w) STATE.white.clock=w; if(bl) STATE.black.clock=bl; if(w||bl) render(); }
+    if(b.clock){
+      // the feed only changes these at move-end; sync ONLY on a real change so the
+      // local per-second countdown isn't reset back every poll.
+      if(b.clock.white!==LC_LAST_W){ LC_LAST_W=b.clock.white; const s=lcClockSec(b.clock.white); if(s!=null) STATE.white.sec=s; }
+      if(b.clock.black!==LC_LAST_B){ LC_LAST_B=b.clock.black; const s=lcClockSec(b.clock.black); if(s!=null) STATE.black.sec=s; }
+      paintClocks();
+    }
   };
   ws.onclose=()=>{ clearInterval(timer); setTimeout(connectLiveChess,3000); };
   ws.onerror=()=>{ try{ ws.close(); }catch(e){} };
 }
 
 /* ---------- BOOT --------------------------------------------------------- */
-STATE.boardNo = "Board "+CONFIG.boardNumber;
-if(CONFIG.pairingsman.token && CONFIG.pairingsman.meetingId){
-  pollStandings(); pollPairingsman();
-  setInterval(pollPairingsman, CONFIG.pairingsman.rosterEverySec*1000);
-  setInterval(pollStandings,  CONFIG.pairingsman.standingsEverySec*1000);
+/* Pairingsman is the master toggle: ON overrides names/ratings/round/         */
+/* tournament/record from the API; OFF keeps whatever you typed in STATE.       */
+if(CONFIG.pairingsman.enabled){
+  if(CONFIG.pairingsman.token && CONFIG.pairingsman.meetingId){
+    STATE.boardNo = "Board "+CONFIG.boardNumber;   // pairing sets it too, once polled
+    pollStandings(); pollPairingsman();
+    setInterval(pollPairingsman, CONFIG.pairingsman.rosterEverySec*1000);
+    setInterval(pollStandings,  CONFIG.pairingsman.standingsEverySec*1000);
+  } else {
+    console.warn("Pairingsman enabled but token/meetingId missing — staying on the typed STATE values.");
+  }
 }
 if(CONFIG.livechess.host){
   if(typeof Chess==="undefined"){ console.warn("chess.js failed to load — board stays on demo (check internet access for the CDN)."); }
