@@ -1,0 +1,15 @@
+# Local, machine-specific config that may contain secrets (Pairingsman token, host)
+config.local.js
+config.local.json
+
+# Your own filled-in working copies (keep the tracked overlays clean)
+*.local.html
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/

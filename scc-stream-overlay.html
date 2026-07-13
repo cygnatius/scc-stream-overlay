@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Shepparton Chess Club — Stream Overlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800;900&family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ==========================================================================
+   SHEPPARTON CHESS CLUB — LIVE STREAM OVERLAY
+   OBS Browser Source: 1920 x 1080. Theme matched to sheppartonchess.club.
+   All live data lives in the STATE object near the bottom of this file.
+   Wiring hooks (lichess feed + Pairingsman) are stubbed at the very bottom.
+   ========================================================================== */
+:root{
+  --bg:#2E2028;          /* club body aubergine */
+  --bg-deep:#1F151B;     /* club nav / darker */
+  --panel:#3A2A33;       /* card panel */
+  --panel-2:#241a20;     /* inner wells */
+  --cream:#F1E7D3;       /* parchment banners */
+  --cream-dim:#cdbfa6;   /* muted parchment text */
+  --gold:#D9A13B;        /* primary accent */
+  --brick:#A9603F;       /* rust/brick secondary (dates, rounds) */
+  --ink:#2b2b3d;         /* dark serif text on cream */
+  --line:rgba(217,161,59,.35);
+  /* site wordmark face (Sitka ships with Windows, so OBS renders it); Playfair falls back */
+  --word:'Sitka Small','Sitka Text','Sitka',sitka1,'Playfair Display',ui-serif,Georgia,serif;
+  --display:'Playfair Display',sitka1,ui-serif,Georgia,serif;
+  --sq-light:#E7D6B4;    /* board light square */
+  --sq-dark:#6B4B39;     /* board dark square */
+  --hi:rgba(217,161,59,.55); /* last-move highlight */
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Figtree',system-ui,sans-serif;color:var(--cream);
+  -webkit-font-smoothing:antialiased}
+/* faint vintage vignette to echo the site hero */
+.stage::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(120% 90% at 30% 0%,rgba(0,0,0,0) 40%,rgba(0,0,0,.45) 100%);
+  z-index:50}
+
+.stage{position:relative;width:1920px;height:1080px;flex:none;
+  transform-origin:center center;background:var(--bg);display:grid;
+  grid-template-rows:96px 1fr 66px;
+  grid-template-columns:1fr;
+  padding:26px 34px;gap:20px}
+
+/* ---------- angled parchment banner (site signature element) ---------- */
+.banner{position:relative;display:inline-flex;align-items:center;
+  background:var(--cream);color:var(--ink);
+  font-family:'Playfair Display',serif;font-weight:800;
+  letter-spacing:.14em;text-transform:uppercase;
+  padding:8px 30px 10px 22px;
+  clip-path:polygon(0 0,100% 0,calc(100% - 16px) 100%,0 100%);
+  box-shadow:0 6px 14px rgba(0,0,0,.35)}
+.banner.sm{font-size:16px;padding:6px 26px 8px 16px}
+.banner::after{content:"";position:absolute;left:0;bottom:-4px;height:4px;
+  width:100%;background:var(--gold)}
+
+/* ===================== HEADER ===================== */
+header{grid-row:1;display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:18px}
+.crest{height:70px;min-width:56px;border-radius:8px;background:var(--cream);
+  display:flex;align-items:center;justify-content:center;padding:5px 9px;
+  box-shadow:0 6px 14px rgba(0,0,0,.4);position:relative}
+.crest img{height:100%;width:auto;object-fit:contain;display:block}
+.brand h1{font-family:var(--word);font-weight:700;
+  font-size:31px;letter-spacing:.12em;text-transform:uppercase;line-height:1}
+.brand .sub{color:var(--gold);font-family:var(--word);font-weight:600;font-size:14px;
+  letter-spacing:.2em;text-transform:uppercase;margin-top:7px}
+.event{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.event .tname{font-family:var(--display);font-weight:800;font-size:26px}
+.event .round{color:var(--bg);background:var(--gold);font-family:var(--word);font-weight:700;
+  font-size:14px;letter-spacing:.14em;text-transform:uppercase;
+  padding:4px 14px;border-radius:3px}
+
+/* ===================== MAIN ===================== */
+main{grid-row:2;display:grid;grid-template-columns:824px 1fr;gap:28px;min-height:0}
+
+/* ---- board column ---- */
+.boardwrap{display:flex;flex-direction:column;justify-content:flex-start;gap:14px;min-height:0}
+.board{--n:8;position:relative;height:min(740px,100%);aspect-ratio:1/1;
+  flex:0 1 auto;min-height:0;margin:0 auto;
+  border:6px solid var(--cream);border-radius:6px;overflow:hidden;
+  box-shadow:0 18px 40px rgba(0,0,0,.55);display:grid;
+  grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr)}
+.sq{position:relative;display:grid;place-items:center}
+.sq.light{background:var(--sq-light)}
+.sq.dark{background:var(--sq-dark)}
+.sq.hi::before{content:"";position:absolute;inset:0;background:var(--hi)}
+.sq .pc{position:relative;font-size:82px;line-height:1;z-index:2;
+  font-family:'Segoe UI Symbol','Noto Sans Symbols2','Arial Unicode MS',sans-serif}
+.pc.w{color:#FBF6EC;text-shadow:0 0 1px #000,0 2px 3px rgba(0,0,0,.5),
+  -1.5px -1.5px 0 #6b5638,1.5px -1.5px 0 #6b5638,-1.5px 1.5px 0 #6b5638,1.5px 1.5px 0 #6b5638}
+.pc.b{color:#241a20;text-shadow:0 1px 2px rgba(0,0,0,.6),
+  -1px -1px 0 #d9c6a6,1px -1px 0 #d9c6a6,-1px 1px 0 #d9c6a6,1px 1px 0 #d9c6a6}
+.coord{position:absolute;font-size:15px;font-weight:800;opacity:.75;z-index:3;
+  font-family:'Figtree',sans-serif}
+.coord.file{right:5px;bottom:3px}
+.coord.rank{left:5px;top:3px}
+.coord.on-light{color:#6B4B39}.coord.on-dark{color:#E7D6B4}
+
+/* ---- right column ---- */
+.side{display:flex;flex-direction:column;gap:18px;min-height:0}
+
+/* player card */
+.pcard{background:var(--panel);border:1px solid rgba(241,231,211,.14);
+  border-radius:10px;padding:16px 18px;display:grid;
+  grid-template-columns:84px 1fr auto;grid-template-rows:auto auto;
+  column-gap:16px;row-gap:6px;align-items:center;position:relative;overflow:hidden}
+.pcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--cream)}
+.pcard.active::before{background:var(--gold)}
+.pcard.active{box-shadow:0 0 0 2px var(--gold) inset,0 10px 24px rgba(0,0,0,.35)}
+.avatar{grid-row:1 / span 2;width:84px;height:84px;border-radius:8px;
+  background:var(--panel-2);border:2px solid var(--cream);overflow:hidden;
+  display:grid;place-items:center;font-family:'Playfair Display',serif;
+  font-weight:800;font-size:34px;color:var(--cream-dim)}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.pname{font-family:var(--display);font-weight:800;font-size:30px;
+  line-height:1.05;display:flex;align-items:center;gap:12px}
+.ptitle{font-size:15px;font-weight:800;color:var(--bg);background:var(--gold);
+  padding:2px 8px;border-radius:3px;letter-spacing:.05em}
+.pmeta{display:flex;align-items:center;gap:18px;font-size:16px;color:var(--cream-dim)}
+.pmeta b{color:var(--cream);font-weight:700}
+.pmeta .rec{color:var(--gold);font-weight:800}
+.clock{grid-row:1 / span 2;justify-self:end;align-self:center;
+  font-family:'Figtree',sans-serif;font-variant-numeric:tabular-nums;
+  font-weight:800;font-size:44px;letter-spacing:.02em;
+  background:var(--panel-2);color:var(--cream);
+  padding:8px 18px;border-radius:8px;min-width:186px;text-align:center;
+  border:1px solid rgba(241,231,211,.12)}
+.pcard.active .clock{background:var(--gold);color:var(--bg-deep)}
+.clock.low{color:#e7a; }
+.flag{font-size:22px}
+
+/* moves */
+.moves{flex:1;min-height:0;background:var(--panel);
+  border:1px solid rgba(241,231,211,.14);border-radius:10px;
+  display:flex;flex-direction:column;overflow:hidden}
+.moves .cap{padding:12px 16px 10px;display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid rgba(241,231,211,.12)}
+.moves .cap .t{font-family:var(--word);font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;font-size:16px;color:var(--cream)}
+.moves .cap .st{font-family:var(--word);font-size:13px;color:var(--gold);font-weight:600;letter-spacing:.12em;text-transform:uppercase}
+.mlist{flex:1;overflow:hidden;padding:6px 10px;
+  display:grid;grid-template-columns:44px 1fr 1fr;
+  align-content:start;gap:2px 6px;font-size:19px;
+  font-variant-numeric:tabular-nums}
+.mno{color:var(--cream-dim);text-align:right;padding:5px 6px;font-weight:700}
+.mv{padding:5px 10px;border-radius:5px;font-weight:600}
+.mv.cur{background:var(--gold);color:var(--bg-deep);font-weight:800}
+
+/* ===================== FOOTER ===================== */
+footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
+  background:var(--bg-deep);border:1px solid rgba(241,231,211,.1);
+  border-radius:10px;padding:0 22px}
+.live{display:flex;align-items:center;gap:12px;font-family:var(--word);font-weight:700;
+  letter-spacing:.16em;text-transform:uppercase;font-size:15px}
+.dot{width:13px;height:13px;border-radius:50%;background:#e23b3b;
+  box-shadow:0 0 0 0 rgba(226,59,59,.6);animation:pulse 1.6s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(226,59,59,.6)}70%{box-shadow:0 0 0 12px rgba(226,59,59,0)}100%{box-shadow:0 0 0 0 rgba(226,59,59,0)}}
+.channels{display:flex;align-items:center;gap:22px;color:var(--cream-dim);
+  font-weight:700;font-size:16px;letter-spacing:.04em}
+.channels b{color:var(--gold)}
+.foot-club{font-family:var(--word);font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;font-size:17px;color:var(--cream)}
+.board-tag{font-family:var(--word);color:var(--gold);font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:14px}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- ============ HEADER ============ -->
+  <header>
+    <div class="brand">
+      <div class="crest"><img src="https://sheppartonchess.club/img/light/Clear.png" alt="Shepparton Chess Club"></div>
+      <div>
+        <h1>Shepparton Chess Club</h1>
+        <div class="sub" id="hdrVenue">Shepparton Mechanics Institute</div>
+      </div>
+    </div>
+    <div class="event">
+      <div class="tname" id="hdrTournament">Club Championship 2026</div>
+      <div class="round" id="hdrRound">Round 4 · Board 1</div>
+    </div>
+  </header>
+
+  <!-- ============ MAIN ============ -->
+  <main>
+    <!-- board -->
+    <div class="boardwrap">
+      <div class="board" id="board"></div>
+    </div>
+
+    <!-- right column -->
+    <div class="side">
+      <!-- top player (Black) -->
+      <div class="pcard" id="cardBlack">
+        <div class="avatar" id="avBlack"></div>
+        <div class="pname"><span id="nmBlack">—</span><span class="ptitle" id="tiBlack" hidden></span></div>
+        <div class="pmeta">
+          <span>Rating <b id="rtBlack">—</b></span>
+          <span>Record <span class="rec" id="rcBlack">—</span></span>
+        </div>
+        <div class="clock" id="clkBlack">—:—:—</div>
+      </div>
+
+      <!-- moves -->
+      <div class="moves">
+        <div class="cap"><span class="t">Moves</span><span class="st" id="mvStatus">Black to move</span></div>
+        <div class="mlist" id="mlist"></div>
+      </div>
+
+      <!-- bottom player (White) -->
+      <div class="pcard active" id="cardWhite">
+        <div class="avatar" id="avWhite"></div>
+        <div class="pname"><span id="nmWhite">—</span><span class="ptitle" id="tiWhite" hidden></span></div>
+        <div class="pmeta">
+          <span>Rating <b id="rtWhite">—</b></span>
+          <span>Record <span class="rec" id="rcWhite">—</span></span>
+        </div>
+        <div class="clock" id="clkWhite">—:—:—</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ FOOTER ============ -->
+  <footer>
+    <div class="live"><span class="dot"></span> Live</div>
+    <div class="channels">
+      Watch the board live on <b>chess.com</b> &nbsp;·&nbsp; <b>lichess.org</b>
+    </div>
+    <div class="foot-club">sheppartonchess.club</div>
+    <div class="board-tag" id="footBoard">Board 1</div>
+  </footer>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script>
+/* =========================================================================
+   LIVE STATE  —  everything the overlay shows comes from here.
+   To go live, feed this object from the wiring hooks at the bottom and call
+   render().  Right now it holds a demo game (Ruy López, after 3.Bb5) so the
+   overlay renders immediately for design review.
+   ========================================================================= */
+const STATE = {
+  venue: "Shepparton Mechanics Institute",
+  tournament: "Club Championship 2026",
+  round: "Round 4",
+  boardNo: "Board 1",
+  // current position as FEN (piece placement is all that's read)
+  fen: "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+  lastMove: { from:"a7", to:"a6" },       // highlighted squares (or null)
+  toMove: "w",                              // 'w' | 'b'
+  moves: ["e4","e5","Nf3","Nc6","Bb5","a6"],// SAN half-moves, in order
+  currentPly: 5,                            // index of the move just played (0-based)
+  white: {
+    name:"Hayden Brennan", title:"", flag:"🇦🇺",
+    rating:1685, record:"3½ / 4",
+    clock:"1:12:44", avatar:"" ,            // avatar = image URL, else initials shown
+  },
+  black: {
+    name:"Shulin Walia", title:"CM", flag:"🇦🇺",
+    rating:1802, record:"4 / 4",
+    clock:"0:58:07", avatar:"",
+  },
+};
+
+/* ---- board rendering -------------------------------------------------- */
+/* both sides use the SOLID glyph shapes; colour (.pc.w cream / .pc.b dark) tells them apart */
+const GLYPH = {K:"♚",Q:"♛",R:"♜",B:"♝",N:"♞",P:"♟",k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"};
+const FILES = ["a","b","c","d","e","f","g","h"];
+
+function squareName(col,row){ return FILES[col] + (8-row); }
+
+function renderBoard(){
+  const el = document.getElementById("board");
+  el.innerHTML = "";
+  const rows = STATE.fen.split(" ")[0].split("/");
+  for(let r=0;r<8;r++){
+    let c=0;
+    const cells=[];
+    for(const ch of rows[r]){
+      if(/\d/.test(ch)){ for(let k=0;k<+ch;k++){cells.push(null);c++;} }
+      else { cells.push(ch); c++; }
+    }
+    for(let col=0;col<8;col++){
+      const piece=cells[col];
+      const isLight=(r+col)%2===0;
+      const name=squareName(col,r);
+      const sq=document.createElement("div");
+      sq.className="sq "+(isLight?"light":"dark");
+      if(STATE.lastMove && (STATE.lastMove.from===name||STATE.lastMove.to===name)) sq.classList.add("hi");
+      if(piece){
+        const p=document.createElement("div");
+        p.className="pc "+(piece===piece.toUpperCase()?"w":"b");
+        p.textContent=GLYPH[piece];
+        sq.appendChild(p);
+      }
+      // coordinates: files on bottom rank, ranks on left file
+      if(r===7){const f=document.createElement("div");f.className="coord file "+(isLight?"on-light":"on-dark");f.textContent=FILES[col];sq.appendChild(f);}
+      if(col===0){const rk=document.createElement("div");rk.className="coord rank "+(isLight?"on-light":"on-dark");rk.textContent=(8-r);sq.appendChild(rk);}
+      el.appendChild(sq);
+    }
+  }
+}
+
+/* ---- moves list ------------------------------------------------------- */
+function renderMoves(){
+  const el=document.getElementById("mlist"); el.innerHTML="";
+  const pairs=Math.ceil(STATE.moves.length/2);
+  for(let i=0;i<pairs;i++){
+    const no=document.createElement("div"); no.className="mno"; no.textContent=(i+1)+".";
+    el.appendChild(no);
+    for(let s=0;s<2;s++){
+      const ply=i*2+s;
+      const cell=document.createElement("div");
+      if(ply<STATE.moves.length){
+        cell.className="mv"+(ply===STATE.currentPly?" cur":"");
+        cell.textContent=STATE.moves[ply];
+      } else { cell.className="mv"; cell.textContent=""; }
+      el.appendChild(cell);
+    }
+  }
+  // keep newest visible
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ---- player cards ----------------------------------------------------- */
+function initials(name){return name.split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();}
+function fillPlayer(side){
+  const p=STATE[side], suf=side==="white"?"White":"Black";
+  document.getElementById("nm"+suf).textContent=p.name||"—";
+  document.getElementById("rt"+suf).textContent=p.rating||"—";
+  document.getElementById("rc"+suf).textContent=p.record||"—";
+  document.getElementById("clk"+suf).textContent=p.clock||"—:—:—";
+  const ti=document.getElementById("ti"+suf);
+  if(p.title){ti.textContent=p.title;ti.hidden=false;} else ti.hidden=true;
+  const av=document.getElementById("av"+suf);
+  if(p.avatar){av.innerHTML='<img src="'+p.avatar+'" alt="">';}
+  else {av.textContent=initials(p.name||"?");}
+}
+
+/* ---- master render ---------------------------------------------------- */
+function render(){
+  document.getElementById("hdrVenue").textContent=STATE.venue;
+  document.getElementById("hdrTournament").textContent=STATE.tournament;
+  document.getElementById("hdrRound").textContent=STATE.round+" · "+STATE.boardNo;
+  document.getElementById("footBoard").textContent=STATE.boardNo;
+  document.getElementById("mvStatus").textContent=(STATE.toMove==="w"?"White":"Black")+" to move";
+  renderBoard(); renderMoves(); fillPlayer("white"); fillPlayer("black");
+  document.getElementById("cardWhite").classList.toggle("active",STATE.toMove==="w");
+  document.getElementById("cardBlack").classList.toggle("active",STATE.toMove==="b");
+}
+render();
+
+/* scale the fixed 1920x1080 canvas to fit the window; OBS at 1920x1080 renders it 1:1 */
+function fitStage(){
+  const s=Math.min(window.innerWidth/1920, window.innerHeight/1080);
+  document.querySelector('.stage').style.transform='scale('+s+')';
+}
+window.addEventListener('resize', fitStage);
+fitStage();
+
+/* =========================================================================
+   LIVE WIRING  —  fill CONFIG, save, reload the OBS browser source.
+   • Leave a section blank to keep it on the demo data (handy for previewing).
+   • KEEP THIS FILE PRIVATE — it holds your Pairingsman token.
+   • DGT LiveChess gives the board / moves / clocks (your LAN).
+   • Pairingsman gives names / ratings / round / tournament / result (internet).
+   ========================================================================= */
+const CONFIG = {
+  boardNumber: 1,                    // which board/table this overlay is for
+
+  pairingsman: {
+    base: "https://pairingsman.com/api/v1",
+    token: "",                       // Bearer token; blank = keep demo names
+    meetingId: null,                 // tonight's meeting id, e.g. 210
+    tournamentId: null,              // optional — auto-read from the pairing if null
+    rosterEverySec: 10,
+    standingsEverySec: 30
+  },
+
+  livechess: {
+    host: "",                        // LiveChess machine on your LAN, e.g. "192.168.1.50:1982"; blank = keep demo board
+    serialnr: null,                  // optional — auto-picks the ACTIVE board if null
+    pollMs: 800
+  }
+};
+
+/* ---------- PAIRINGSMAN (names, ratings, round, tournament, record) ------ */
+async function pmFetch(path){
+  const r = await fetch(CONFIG.pairingsman.base + path, {
+    headers:{ "Authorization":"Bearer "+CONFIG.pairingsman.token, "Accept":"application/json" }
+  });
+  if(!r.ok) throw new Error("Pairingsman "+path+" -> "+r.status);
+  return r.json();
+}
+function fmtPts(x){
+  const n=Number(x); if(Number.isNaN(n)) return String(x);
+  const w=Math.floor(n), f=n-w;
+  const frac = f===0.5 ? "½" : (f ? String(+f.toFixed(1)).replace("0.",".") : "");
+  return (w||!frac ? String(w) : "") + frac;
+}
+let PM_STANDINGS = {};   // participantId -> standings row
+function mapPlayer(dst, src){
+  if(!src) return;
+  dst.name   = src.name != null ? src.name : dst.name;
+  dst.rating = src.overall_rating != null ? src.overall_rating : "";
+  dst.title  = "";        // API sample carries no title/flag/avatar — keep slots reserved
+}
+function applyRecord(dst, pid){
+  const row = PM_STANDINGS[pid];
+  if(!row){ dst.record = "—"; return; }
+  const pts = row.points ?? row.score ?? row.total ?? row.pts ?? null;
+  const gp  = row.games ?? row.games_played ?? row.played ?? row.gp ?? null;
+  dst.record = pts==null ? "—" : (gp!=null ? fmtPts(pts)+" / "+gp : fmtPts(pts));
+}
+async function fetchTournament(id){
+  try{ const j=await pmFetch("/tournaments/"+id); const t=j.data||j;
+       if(t.name){ STATE.tournament=t.name; render(); } }catch(e){ console.warn(e); }
+}
+let PM_TID=null, PM_TOURFETCHED=false;
+async function pollPairingsman(){
+  try{
+    const j = await pmFetch("/meetings/"+CONFIG.pairingsman.meetingId+"/pairings");
+    const p = (j.data||[]).find(x => x.table === CONFIG.boardNumber);
+    if(!p) return;                                   // no game on this board yet
+    STATE.round   = "Round "+p.round;
+    STATE.boardNo = "Board "+p.table;
+    PM_TID = CONFIG.pairingsman.tournamentId || (p.tournament && p.tournament.id) || PM_TID;
+    mapPlayer(STATE.white, p.white);
+    mapPlayer(STATE.black, p.black);
+    applyRecord(STATE.white, p.white && p.white.id);
+    applyRecord(STATE.black, p.black && p.black.id);
+    if(PM_TID && !PM_TOURFETCHED){ PM_TOURFETCHED=true; fetchTournament(PM_TID); }
+    render();
+  }catch(e){ console.warn(e); }                      // keep last good frame on error
+}
+async function pollStandings(){
+  try{
+    const path = PM_TID ? "/tournaments/"+PM_TID+"/standings"
+                        : "/meetings/"+CONFIG.pairingsman.meetingId+"/standings";
+    const j = await pmFetch(path);
+    const rows = (j.data && j.data.standings) || [];
+    const map = {};
+    for(const row of rows){
+      const pid = row.participant_id ?? row.id ?? (row.participant && row.participant.id);
+      if(pid!=null) map[pid]=row;
+    }
+    PM_STANDINGS = map;
+  }catch(e){ console.warn(e); }
+}
+
+/* ---------- DGT LIVECHESS (board, moves, clocks) ------------------------- */
+let GAME=null, LC_SERIAL=null, LC_PENDING=null, LC_SNAP=null;
+function lcClock(v){
+  if(v==null) return null;
+  if(typeof v==="string") return v;
+  let s = v>100000 ? Math.round(v/1000) : Math.round(v);   // ms vs s heuristic
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), ss=s%60;
+  return h+":"+String(m).padStart(2,"0")+":"+String(ss).padStart(2,"0");
+}
+function commitMove(m){
+  STATE.moves.push(m.san);
+  STATE.currentPly = STATE.moves.length-1;
+  STATE.lastMove   = { from:m.from, to:m.to };
+  STATE.fen        = GAME.fen();
+  STATE.toMove     = GAME.turn();
+  render();
+}
+function snapTo(placement){                                // joined mid-game / desync fallback
+  try{ GAME = new Chess(placement+" "+(STATE.toMove||"w")+" - - 0 1"); }catch(e){ return; }
+  STATE.fen=GAME.fen(); STATE.lastMove=null; render();
+}
+function applyPlacement(placement){
+  placement = String(placement).split(" ")[0];
+  if(!GAME){ GAME=new Chess(); STATE.moves=[]; STATE.currentPly=-1; STATE.lastMove=null;
+             STATE.fen=GAME.fen(); STATE.toMove="w"; render(); }
+  if(GAME.fen().split(" ")[0]===placement){ clearTimeout(LC_SNAP); LC_PENDING=null; return; }
+  for(const m of GAME.moves({verbose:true})){          // normal case: one legal move reaches it
+    GAME.move(m);
+    if(GAME.fen().split(" ")[0]===placement){ commitMove(m); clearTimeout(LC_SNAP); LC_PENDING=null; return; }
+    GAME.undo();
+  }
+  const back = GAME.undo();                             // takeback correction on the board
+  if(back && GAME.fen().split(" ")[0]===placement){
+    STATE.moves.pop(); const h=GAME.history({verbose:true}); const l=h[h.length-1];
+    STATE.currentPly=STATE.moves.length-1; STATE.lastMove=l?{from:l.from,to:l.to}:null;
+    STATE.fen=GAME.fen(); STATE.toMove=GAME.turn(); render(); clearTimeout(LC_SNAP); LC_PENDING=null; return;
+  }
+  if(back) GAME.move(back);
+  if(LC_PENDING!==placement){                           // unmatched: likely a piece mid-move — snap only if it settles
+    LC_PENDING=placement; clearTimeout(LC_SNAP); LC_SNAP=setTimeout(()=>snapTo(placement),1200);
+  }
+}
+function connectLiveChess(){
+  const url="ws://"+CONFIG.livechess.host+"/api/v1.0";
+  let ws, timer;
+  try{ ws=new WebSocket(url); }catch(e){ setTimeout(connectLiveChess,3000); return; }
+  ws.onopen=()=>{ timer=setInterval(()=>{ try{ ws.send(JSON.stringify({id:1,call:"eboards"})); }catch(e){} }, CONFIG.livechess.pollMs); };
+  ws.onmessage=(ev)=>{
+    let msg; try{ msg=JSON.parse(ev.data); }catch(e){ return; }
+    let boards = Array.isArray(msg.param) ? msg.param
+               : (msg.param && msg.param.board ? [msg.param] : null);
+    if(!boards) return;
+    let b = CONFIG.livechess.serialnr ? boards.find(x=>x.serialnr===CONFIG.livechess.serialnr) : null;
+    if(!b) b = boards.find(x=>x.state==="ACTIVE") || boards[0];
+    if(!b) return;
+    LC_SERIAL = b.serialnr || LC_SERIAL;
+    if(b.board) applyPlacement(b.board);
+    if(b.clock){ const w=lcClock(b.clock.white), bl=lcClock(b.clock.black);
+                 if(w) STATE.white.clock=w; if(bl) STATE.black.clock=bl; if(w||bl) render(); }
+  };
+  ws.onclose=()=>{ clearInterval(timer); setTimeout(connectLiveChess,3000); };
+  ws.onerror=()=>{ try{ ws.close(); }catch(e){} };
+}
+
+/* ---------- BOOT --------------------------------------------------------- */
+STATE.boardNo = "Board "+CONFIG.boardNumber;
+if(CONFIG.pairingsman.token && CONFIG.pairingsman.meetingId){
+  pollStandings(); pollPairingsman();
+  setInterval(pollPairingsman, CONFIG.pairingsman.rosterEverySec*1000);
+  setInterval(pollStandings,  CONFIG.pairingsman.standingsEverySec*1000);
+}
+if(CONFIG.livechess.host){
+  if(typeof Chess==="undefined"){ console.warn("chess.js failed to load — board stays on demo (check internet access for the CDN)."); }
+  else connectLiveChess();
+}
+render();
+</script>
+</body>
+</html>
