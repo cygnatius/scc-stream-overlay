@@ -77,7 +77,7 @@ header{grid-row:1;display:flex;align-items:center;justify-content:space-between}
   padding:4px 14px;border-radius:3px}
 
 /* ===================== MAIN ===================== */
-main{grid-row:2;display:grid;grid-template-columns:824px 1fr;gap:24px;min-height:0}
+main{grid-row:2;display:grid;grid-template-columns:820px 500px;justify-content:center;gap:32px;min-height:0}
 
 /* ---- board column: Black card · board · White card ---- */
 .boardwrap{display:flex;flex-direction:column;justify-content:center;gap:12px;min-height:0}
@@ -146,9 +146,9 @@ main{grid-row:2;display:grid;grid-template-columns:824px 1fr;gap:24px;min-height
 .moves .cap .t{font-family:var(--word);font-weight:700;
   letter-spacing:.14em;text-transform:uppercase;font-size:16px;color:var(--cream)}
 .moves .cap .st{font-family:var(--word);font-size:13px;color:var(--gold);font-weight:600;letter-spacing:.12em;text-transform:uppercase}
-.mlist{flex:1;overflow:hidden;padding:10px 16px;
-  display:grid;grid-template-columns:52px 150px 150px;justify-content:center;
-  align-content:start;gap:4px 10px;font-size:22px;
+.mlist{flex:1;overflow:hidden;padding:12px 20px;
+  display:grid;grid-template-columns:46px 1fr 1fr;
+  align-content:start;gap:6px 12px;font-size:23px;
   font-variant-numeric:tabular-nums}
 .mno{color:var(--cream-dim);text-align:right;padding:6px 8px;font-weight:700}
 .mv{padding:6px 12px;border-radius:5px;font-weight:600}
@@ -305,12 +305,12 @@ const STATE = {
   moves: ["e4","e5","Nf3","Nc6","Bb5","a6"],// SAN half-moves, in order
   currentPly: 5,                            // index of the move just played (0-based)
   white: {
-    name:"Hayden Brennan", title:"", flag:"🇦🇺",
+    name:"White Name", title:"", flag:"🇦🇺",
     rating:1685, record:"3½ / 4",
     clock:"1:12:44", avatar:"" ,            // avatar = image URL, else initials shown
   },
   black: {
-    name:"Shulin Walia", title:"CM", flag:"🇦🇺",
+    name:"Black Name", title:"CM", flag:"🇦🇺",
     rating:1802, record:"4 / 4",
     clock:"0:58:07", avatar:"",
   },
@@ -491,8 +491,14 @@ function paintClocks(){
 STATE.white.sec = parseClock(STATE.white.clock);
 STATE.black.sec = parseClock(STATE.black.clock);
 paintClocks();
+// Which side's clock is actually running, per the DGT feed ('w' | 'b' | null).
+// null — before the game starts, or while both clocks are stopped between moves —
+// means nothing ticks; the displayed times just hold. This is set from the
+// LiveChess clock message (see the handler in connectLiveChess below).
+let CLOCK_RUN_SIDE = null;
 setInterval(function(){
-  const side = STATE.toMove==="w" ? STATE.white : STATE.black;
+  if(!CLOCK_RUN_SIDE) return;                 // no clock running -> don't count down
+  const side = CLOCK_RUN_SIDE==="w" ? STATE.white : STATE.black;
   if(side.sec!=null && side.sec>0){ side.sec-=1; paintClocks(); }
 }, 1000);
 
@@ -521,8 +527,8 @@ const CONFIG = {
   },
 
   livechess: {
-    host: "",                        // LiveChess machine on your LAN, e.g. "192.168.1.50:1982"; blank = keep demo board
-    serialnr: null,                  // optional — auto-picks the ACTIVE board if null
+    host: "192.168.0.92:1982",                        // LiveChess machine on your LAN, e.g. "192.168.1.50:1982"; blank = keep demo board
+    serialnr: 3000150100,                  // optional — auto-picks the ACTIVE board if null
     pollMs: 800
   }
 };
@@ -592,7 +598,7 @@ async function pollStandings(){
 }
 
 /* ---------- DGT LIVECHESS (board, moves, clocks) ------------------------- */
-let GAME=null, LC_SERIAL=null, LC_PENDING=null, LC_SNAP=null, LC_LAST_W, LC_LAST_B;
+let GAME=null, GAME_STARTED=false, LC_SERIAL=null, LC_SNAP=null, LC_LAST_W, LC_LAST_B;
 function lcClockSec(v){ if(v==null) return null; if(typeof v==="string") return parseClock(v); return v>100000 ? Math.round(v/1000) : Math.round(v); }
 function commitMove(m){
   STATE.moves.push(m.san);
@@ -600,32 +606,118 @@ function commitMove(m){
   STATE.lastMove   = { from:m.from, to:m.to };
   STATE.fen        = GAME.fen();
   STATE.toMove     = GAME.turn();
+  GAME_STARTED     = true;
   render();
 }
-function snapTo(placement){                                // joined mid-game / desync fallback
-  try{ GAME = new Chess(placement+" "+(STATE.toMove||"w")+" - - 0 1"); }catch(e){ return; }
-  STATE.fen=GAME.fen(); STATE.lastMove=null; render();
+/* -------------------------------------------------------------------------
+   Move reconstruction from the DGT board feed.
+   The eboards feed only gives the current piece PLACEMENT (no move list), so we
+   rebuild the moves ourselves. GAME (chess.js) is our source of truth. Guiding
+   rule: once we're tracking a game we NEVER throw its moves away. Each new
+   placement can only ADD reconstructed move(s) or apply an explicit takeback;
+   an unreachable placement (a piece physically mid-move) is simply ignored and
+   the last good position is held until the move completes. The one clean reset
+   is the standard starting position, which begins a fresh game.
+   ------------------------------------------------------------------------- */
+const START_PLACEMENT = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+let LC_LASTSEEN = null;                                     // last placement processed (dedupes polls)
+function placementOf(fen){ return String(fen).split(" ")[0]; }
+function pushState(){ STATE.fen=GAME.fen(); STATE.toMove=GAME.turn(); render(); }
+
+function newGameFromStart(){                                // board reset to the initial position
+  GAME=new Chess(); STATE.moves=[]; STATE.currentPly=-1; STATE.lastMove=null;
+  GAME_STARTED=false; clearTimeout(LC_SNAP); LC_SNAP=null; pushState();
+}
+function adoptPosition(placement){                          // first sync / last-resort desync recovery
+  // We have no trustworthy move history for this position, so start a clean list from here.
+  try{ GAME=new Chess(placement+" "+(STATE.toMove||"w")+" - - 0 1"); }catch(e){ return false; }
+  STATE.moves=[]; STATE.currentPly=-1; STATE.lastMove=null; pushState(); return true;
+}
+// Squares that differ between two placements (as algebraic names, e.g. "e4").
+function changedSquares(p1,p2){
+  const cells=p=>{const o=[];for(const row of p.split("/")){for(const ch of row){ if(/\d/.test(ch)){for(let k=0;k<+ch;k++)o.push("");} else o.push(ch); }}return o;};
+  const a=cells(p1), b=cells(p2), files="abcdefgh", set=new Set();
+  for(let i=0;i<64;i++){ if(a[i]!==b[i]) set.add(files[i%8]+(8-Math.floor(i/8))); }
+  return set;
+}
+// Forward legal line from the current position to `target`, or null. Depth 1 covers every
+// normal move (incl. castling, promotion, en passant); depth 2 recovers the rare case where
+// a poll was missed between two moves (e.g. a capture + recapture). Kept deliberately cheap —
+// chess.js move generation is slow, so we never do a deep blind search on every poll.
+function findSequence(target, maxDepth){
+  for(const m of GAME.moves({verbose:true})){            // depth 1: one move reaches it
+    GAME.move(m); const hit=placementOf(GAME.fen())===target; GAME.undo();
+    if(hit) return [m];
+  }
+  if(maxDepth<2) return null;
+  const changed=changedSquares(placementOf(GAME.fen()),target);   // depth 2: prune to moves that touch the diff
+  for(const m of GAME.moves({verbose:true})){
+    if(!changed.has(m.from) && !changed.has(m.to)) continue;
+    GAME.move(m);
+    let found=null;
+    for(const m2 of GAME.moves({verbose:true})){
+      GAME.move(m2); const hit=placementOf(GAME.fen())===target; GAME.undo();
+      if(hit){ found=[m,m2]; break; }
+    }
+    GAME.undo();
+    if(found) return found;
+  }
+  return null;
+}
+// Board moved BACKWARD (a takeback of 1..maxBack half-moves). Returns true if applied.
+function tryTakeback(target, maxBack){
+  const undone=[];
+  for(let i=0;i<maxBack;i++){
+    const b=GAME.undo(); if(!b) break; undone.push(b);
+    if(placementOf(GAME.fen())===target){
+      for(let k=0;k<undone.length;k++) STATE.moves.pop();
+      const h=GAME.history({verbose:true}), l=h[h.length-1];
+      STATE.currentPly=STATE.moves.length-1; STATE.lastMove=l?{from:l.from,to:l.to}:null;
+      pushState(); return true;
+    }
+  }
+  for(let i=undone.length-1;i>=0;i--) GAME.move(undone[i]);   // restore — not a takeback
+  return false;
 }
 function applyPlacement(placement){
-  placement = String(placement).split(" ")[0];
-  if(!GAME){ GAME=new Chess(); STATE.moves=[]; STATE.currentPly=-1; STATE.lastMove=null;
-             STATE.fen=GAME.fen(); STATE.toMove="w"; render(); }
-  if(GAME.fen().split(" ")[0]===placement){ clearTimeout(LC_SNAP); LC_PENDING=null; return; }
-  for(const m of GAME.moves({verbose:true})){          // normal case: one legal move reaches it
-    GAME.move(m);
-    if(GAME.fen().split(" ")[0]===placement){ commitMove(m); clearTimeout(LC_SNAP); LC_PENDING=null; return; }
-    GAME.undo();
+  placement = placementOf(placement);
+  if(placement===LC_LASTSEEN) return;                        // unchanged since last poll (incl. a held transient)
+  LC_LASTSEEN = placement;
+  clearTimeout(LC_SNAP); LC_SNAP=null;                       // placement changed → cancel any pending recovery
+
+  if(!GAME){                                                 // very first board data: adopt what's on the board
+    if(placement===START_PLACEMENT) newGameFromStart(); else adoptPosition(placement);
+    return;
   }
-  const back = GAME.undo();                             // takeback correction on the board
-  if(back && GAME.fen().split(" ")[0]===placement){
-    STATE.moves.pop(); const h=GAME.history({verbose:true}); const l=h[h.length-1];
-    STATE.currentPly=STATE.moves.length-1; STATE.lastMove=l?{from:l.from,to:l.to}:null;
-    STATE.fen=GAME.fen(); STATE.toMove=GAME.turn(); render(); clearTimeout(LC_SNAP); LC_PENDING=null; return;
+  if(placement===START_PLACEMENT){                           // reset to the initial position → fresh game
+    if(placementOf(GAME.fen())!==START_PLACEMENT || STATE.moves.length) newGameFromStart();
+    return;
   }
-  if(back) GAME.move(back);
-  if(LC_PENDING!==placement){                           // unmatched: likely a piece mid-move — snap only if it settles
-    LC_PENDING=placement; clearTimeout(LC_SNAP); LC_SNAP=setTimeout(()=>snapTo(placement),1200);
+  if(placementOf(GAME.fen())===placement) return;            // already in sync
+
+  const seq = findSequence(placement, 2);                    // add the move(s) just played
+  if(seq && seq.length){ for(const m of seq){ GAME.move(m); commitMove(m); } return; }
+  if(tryTakeback(placement, 2)) return;                      // board went backward
+
+  // Fresh join with an unknown side-to-move: when we adopt a game already in progress we
+  // have to guess whose move it is. If that guess was wrong the first real move looks
+  // unreachable — so, ONLY while we still have no moves recorded (nothing to lose), try the
+  // other side before giving up. This never touches a game we're actually tracking.
+  if(STATE.moves.length===0){
+    const cur=placementOf(GAME.fen()), other=(GAME.turn()==="w")?"b":"w";
+    let test; try{ test=new Chess(cur+" "+other+" - - 0 1"); }catch(e){ test=null; }
+    if(test) for(const m of test.moves({verbose:true})){
+      test.move(m);
+      if(placementOf(test.fen())===placement){ GAME=test; commitMove(m); return; }
+      test.undo();
+    }
   }
+
+  // Otherwise the placement is UNREACHABLE from the game we're tracking. This is almost
+  // always a piece physically mid-move (lifted while the player thinks) — so we simply HOLD
+  // the last good position and wait; when the piece lands, that move is added. We NEVER wipe
+  // or rebuild the move list here — that was the bug. If the board is ever genuinely out of
+  // sync (pieces knocked over / rearranged), reset it to the starting position to resync.
 }
 function connectLiveChess(){
   const url="ws://"+CONFIG.livechess.host+"/api/v1.0";
@@ -637,7 +729,7 @@ function connectLiveChess(){
     let boards = Array.isArray(msg.param) ? msg.param
                : (msg.param && msg.param.board ? [msg.param] : null);
     if(!boards) return;
-    let b = CONFIG.livechess.serialnr ? boards.find(x=>x.serialnr===CONFIG.livechess.serialnr) : null;
+    let b = CONFIG.livechess.serialnr ? boards.find(x=>String(x.serialnr)===String(CONFIG.livechess.serialnr)) : null;
     if(!b) b = boards.find(x=>x.state==="ACTIVE") || boards[0];
     if(!b) return;
     LC_SERIAL = b.serialnr || LC_SERIAL;
@@ -647,6 +739,13 @@ function connectLiveChess(){
       // local per-second countdown isn't reset back every poll.
       if(b.clock.white!==LC_LAST_W){ LC_LAST_W=b.clock.white; const s=lcClockSec(b.clock.white); if(s!=null) STATE.white.sec=s; }
       if(b.clock.black!==LC_LAST_B){ LC_LAST_B=b.clock.black; const s=lcClockSec(b.clock.black); if(s!=null) STATE.black.sec=s; }
+      // Only tick a clock while the DGT feed says one is running — this is what stops the
+      // pre-game countdown. `clock.run` is a BOOLEAN: true while a clock is running, null/
+      // false when both are stopped (before the game starts and while it's paused). It does
+      // not name a side, so the running clock is simply the side to move. (The feed's white/
+      // black values hold steady between moves — confirmed live — so we tick locally and
+      // re-sync to the feed only when it changes, at move-end, above.)
+      CLOCK_RUN_SIDE = b.clock.run ? STATE.toMove : null;
       paintClocks();
     }
   };
@@ -655,6 +754,9 @@ function connectLiveChess(){
 }
 
 /* ---------- BOOT --------------------------------------------------------- */
+/* Build marker — check the browser console (F12) to confirm you're on the      */
+/* latest overlay and not a stale cached copy.                                  */
+console.info("SCC overlay build: never-wipe-moves 2026-07-14b");
 /* Pairingsman is the master toggle: ON overrides names/ratings/round/         */
 /* tournament/record from the API; OFF keeps whatever you typed in STATE.       */
 if(CONFIG.pairingsman.enabled){
