@@ -78,20 +78,48 @@ const CONFIG_DEFAULTS = {
 
   scenes: {
     active: "game",                      // start | versus | game | postgame | intermission | ending
-    default_transition: { type: "fade", duration_ms: 1000, delay_ms: 0 },
-    scenes: {                            // per-scene overrides land here (stage 2)
-      start: {},
-      versus: {},
-      game: { bottom_strip: false },     // optional sponsor strip above the footer, default OFF
-      postgame: {},
-      intermission: {},
-      ending: {},
+    // A running sequence: {name:"game_start"|"game_end", started_at:<epoch ms>}.
+    // The display computes the current phase from started_at, so a reload
+    // resumes mid-sequence. null = no sequence; `active` shows directly.
+    sequence: null,
+    // A cancellable automatic transition awaiting its arm delay:
+    // {action:"game_start"|"game_end", fires_at:<epoch ms>, reason:"…"}.
+    // Written by the display's detector; cleared by admin cancel, by any
+    // manual scene command, or by the display when it fires or loses
+    // confidence. null = nothing pending.
+    pending_auto: null,
+    auto: {
+      enabled: false,                    // board-state driven switching; operator opt-in
+      arm_delay_ms: 4000,                // cancel window before an auto transition fires
+    },
+    default_transition: { type: "fade", duration_ms: 1000, delay_ms: 0, direction: "left" },
+    transitions: {                       // per-type parameter defaults
+      cut: {},
+      fade: {},
+      crossfade: {},
+      slide: { direction: "left" },
+      wipe: { direction: "left" },
+    },
+    scenes: {                            // per-scene settings; transition overrides the default on ENTER
+      start: { transition: null },
+      versus: { transition: null },
+      game: { transition: null, bottom_strip: false },  // strip is stage 4, default OFF
+      postgame: { transition: null, result_text: "" },  // manual result until PGN/Pairingsman stages
+      intermission: {
+        transition: null,
+        video: "",                       // filename inside assets/video/
+        chapters: [{ start: 0 }],        // chapter start offsets in seconds
+        resume_mode: "chapter",          // chapter | exact | rewind | restart
+        rewind_ms: 5000,
+        loop: true,
+        muted: false,
+      },
+      ending: { transition: null },
     },
     sequences: {
       game_start: { versus_ms: 8000 },
       game_end: { postgame_ms: 40000, start_ms: 150000 },
     },
-    auto_transitions: false,             // board-state driven switching (stage 2)
   },
 
   sponsors: {
@@ -332,10 +360,41 @@ function readBody(req, res, cb) {
   req.on("error", () => {});
 }
 
+// Display runtime status — RAM only, never touches disk. The display POSTs its
+// heartbeat (~1s: detector state, confidence, effective scene, connection flags)
+// and the admin polls it. Kept out of the config store so status churn never
+// invalidates the config hash or triggers the display's own poll loop.
+let DISPLAY_STATUS = null;
+let DISPLAY_STATUS_AT = 0;
+
 function handleApi(req, res, pathname) {
   // GET /api/config/hash — the display's cheap poll target.
   if (req.method === "GET" && pathname === "/api/config/hash") {
     return sendJSON(res, 200, { ok: true, hash: configHash() });
+  }
+
+  // Display heartbeat: POST from the display page, GET from admin.
+  if (pathname === "/api/status") {
+    if (req.method === "POST") {
+      return readBody(req, res, (buf) => {
+        try {
+          const parsed = JSON.parse(buf.toString("utf8"));
+          if (!isPlainObject(parsed)) return sendError(res, 400, "status must be a JSON object");
+          DISPLAY_STATUS = parsed;
+          DISPLAY_STATUS_AT = Date.now();
+          return sendJSON(res, 200, { ok: true });
+        } catch {
+          return sendError(res, 400, "invalid JSON");
+        }
+      });
+    }
+    if (req.method === "GET") {
+      return sendJSON(res, 200, {
+        ok: true,
+        status: DISPLAY_STATUS,
+        age_ms: DISPLAY_STATUS ? Date.now() - DISPLAY_STATUS_AT : null,
+      });
+    }
   }
 
   // GET /api/config — everything merged, plus the hash it corresponds to.

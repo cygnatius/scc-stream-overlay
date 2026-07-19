@@ -178,5 +178,19 @@ SCC.moves = (function () {
     el.scrollTop = el.scrollHeight;
   }
 
-  return { init, applyPlacement, reset, renderList, START_PLACEMENT, placementOf };
+  // Read-only view of the tracked game for the scene auto-detector.
+  // Uses the internal chess.js instance; never mutates it.
+  function gameStatus() {
+    if (!GAME) return { tracking: false, over: false, checkmate: false, stalemate: false, draw: false, turn: null };
+    return {
+      tracking: true,
+      over: GAME.game_over(),
+      checkmate: GAME.in_checkmate(),
+      stalemate: GAME.in_stalemate(),
+      draw: GAME.in_draw(),
+      turn: GAME.turn(),
+    };
+  }
+
+  return { init, applyPlacement, reset, renderList, gameStatus, START_PLACEMENT, placementOf };
 })();

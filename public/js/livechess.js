@@ -90,7 +90,11 @@ SCC.livechess = (function () {
       if (!b) b = boards.find(x => x.state === "ACTIVE") || boards[0];
       if (!b) return;
       LC_SERIAL = b.serialnr || LC_SERIAL;
-      if (b.board) SCC.moves.applyPlacement(b.board);
+      // Raw placement straight from the feed, BEFORE the move engine filters it.
+      // The scene auto-detector needs this: the DGT "result" signal (both kings
+      // placed on the centre squares) is exactly the kind of unreachable
+      // placement the move engine deliberately holds and hides.
+      if (b.board) { game.rawPlacement = String(b.board).split(" ")[0]; SCC.moves.applyPlacement(b.board); }
       if (b.clock) {
         // the feed only changes these at move-end; sync ONLY on a real change so the
         // local per-second countdown isn't reset back every poll.

@@ -85,5 +85,11 @@ SCC.config = (function () {
     tick();
   }
 
-  return { store, start, onChange };
+  // Force an immediate full fetch (outside the poll cadence). Used by pages
+  // that just wrote config and want the store current right now.
+  async function refresh() {
+    try { await fetchFull(); store.ok = true; } catch (e) { store.ok = false; }
+  }
+
+  return { store, start, onChange, refresh };
 })();
