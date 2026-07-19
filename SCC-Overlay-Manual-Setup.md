@@ -1,87 +1,94 @@
-# Shepparton Chess Club — Stream Overlay (Manual) Setup
+# Shepparton Chess Club — Running a Broadcast from the Admin Page
 
-One file, `scc-stream-overlay-manual.html`. No accounts, no APIs. You type the
-players and event into the file; the board, moves and clocks come live from
-DGT LiveChess. Copy this one file to whatever machine runs OBS.
+Everything is operated from `http://127.0.0.1:8420/admin.html` in a normal
+browser while the stream runs. Every save lands on the display within half a
+second, mid-game, with no flicker, no board reset and no OBS refresh. No
+accounts and no internet are needed — this is the fully manual mode, and it
+always works even when Pairingsman is offline or not configured.
 
----
-
-## 1. Add it to OBS (one-time per machine)
-
-1. Copy `scc-stream-overlay-manual.html` onto the machine and put it somewhere
-   stable, e.g. `C:\SCC\scc-stream-overlay-manual.html`.
-2. In OBS, under **Sources** click **+ → Browser**, name it, **OK**.
-3. Tick **Local file**, **Browse** to the html, set **Width 1920**,
-   **Height 1080**, **OK**.
-4. You'll see the overlay full-size with a demo game — that's expected until
-   you connect the board.
+(First-time machine setup — Node, OBS, the board — is in
+**SCC-Overlay-Setup.md**. This page is the operator's guide.)
 
 ---
 
-## 2. Type in the players and event
+## Before the game
 
-Right-click the html → **Open with → Notepad**. Near the middle, under
-`►►► EDIT THIS — YOUR PLAYERS AND EVENT ◄◄◄`, set:
+**Event tab** — event title, season, round, time control, table, running
+times (they feed the *start* scene), social links for the footer, and the
+"next broadcast" block shown on the *ending* scene (auto-computed weekly by
+default; switch to manual to type a date, or hide it).
 
-```
-venue:      "Shepparton Mechanics Institute"
-tournament: "Club Championship 2026"
-round:      "Round 4"
-boardNo:    "Board 1"
+**Live tab → Match** — type the two players in under the literal **White**
+and **Black** labels: name, optional title (CM, WFM…), optional rating,
+optional record (`1–4` and `4–1–2` styles both fine). Or skip typing:
 
-white:  name:"Hayden Brennan"  title:""    rating:1685  record:"3½ / 4"
-black:  name:"Shulin Walia"    title:"CM"  rating:1802  record:"4 / 4"
-```
+**Players tab** — keep a club **roster** (name, photo, rating, record). Press
+**→ White** / **→ Black** on a roster row to drop that player straight into
+the match fields, photo included. Photos upload here (or drop files into
+`assets/players/` and Rescan). The **photo policy** picks photos + initials
+avatars, photos only, or no photos at all.
 
-Leave the `fen`, `moves`, `lastMove`, `toMove` lines alone — the board feed
-fills those. Save the file.
+**Sponsors & Zones tab** — sponsor records (name, tier, logo, message) and
+the zone layout: left / centre / right, each whole or split top + bottom.
+Open scenes (start, versus, postgame, ending) show every column as a bottom
+band; the **game scene shows the right column under the moves**, with the
+council funder credit kept beneath it. An active zone with no tier assigned
+shows a designed "advertise here" invitation. Keep at most four slots active —
+admin warns above four. The optional **game-scene bottom strip** relocates
+all three columns into a strip above the footer; off (the default) the game
+scene renders exactly as it always has.
 
----
-
-## 3. Connect the DGT board
-
-Further down, find `const CONFIG` and set **host**:
-
-```
-livechess:
-  host: "127.0.0.1:1982"     // LiveChess is on the SAME PC as OBS
-  // or
-  host: "192.168.1.50:1982"  // LiveChess is on a DIFFERENT PC (use its IP)
-```
-
-- **Same PC** (LiveChess and OBS together): use `127.0.0.1:1982`.
-- **Different PC**: on the LiveChess PC open **Command Prompt**, type `ipconfig`,
-  read the **IPv4 Address**, and use that plus `:1982`.
-
-Save the file, then in OBS **right-click the source → Refresh**. The board goes
-live.
+**Intermission tab** — drop video files into `assets/video/`, Rescan, pick
+one. Chapters (time offsets) make the "back from break" resume start from the
+chapter that was interrupted, so the whole video eventually airs; exact /
+rewind / restart modes are there too.
 
 ---
 
-## What must be true
+## During the broadcast — the Live tab
 
-- **DGT LiveChess is running** with the board connected and the game showing.
-- If OBS and LiveChess are on **different PCs**: both on the **same network**,
-  and port **1982** allowed through the LiveChess PC's firewall.
-- The **OBS PC has internet** — the fonts and the move-parsing library load
-  online. (The player names you typed do **not** need internet.)
+- **Scene buttons** — start · versus · game · postgame · intermission ·
+  ending. Gold = on air now. Switching manually always works and cancels any
+  running sequence.
+- **Sequences** — *Game start* plays versus for 8 s then lands on the game;
+  *Game end* plays postgame 40 s → start 150 s → intermission. Timings are in
+  the Transitions tab. A live readout counts the current phase down, and
+  **Stop here** freezes on whatever is showing.
+- **Automatic switching** (optional, off by default) — the board itself
+  proposes game start / game end (first move played; mate/stalemate; both
+  kings placed on the centre squares). Every proposal shows at the top with a
+  countdown and a **Cancel** button before it fires. A board disconnect
+  withdraws proposals rather than firing them.
+- **Postgame result** — press `1–0` / `½–½` / `0–1` the moment the game ends
+  (they write immediately), or type anything ("White wins on forfeit") and
+  **Set**.
+- **Demo mode** — shows the built-in fake game for designing scenes and
+  sponsor layouts with no board present. A persistent banner shows in admin
+  while it's on; the stream shows no indicator. Turn it off before going live.
+
+The status pills at the top always show: config API, display heartbeat,
+LiveChess connection, the scene on air, and what the board detector currently
+believes (with its confidence). If the server or board drops, the display
+holds its last good state and recovers by itself — nothing on stream goes
+blank.
 
 ---
 
-## Quick test
+## Transitions tab
 
-1. Overlay shows in OBS at 1920×1080 (demo game) → OBS is good.
-2. Set `host`, Refresh → the demo game is replaced by whatever is on your board.
-3. Make a move → the board and move list update within ~1 second.
-
-If the board doesn't move: wrong `host`/IP, LiveChess not running, firewall, or
-(two-PC setup) not on the same network. Copy one raw LiveChess message and the
-parser can be adjusted.
+Default transition (fade, 1000 ms out of the box), per-type defaults, a
+per-scene override on entering each scene (cut / fade / crossfade / slide /
+wipe, with direction for slide and wipe), sequence dwell times, and the
+cancel-window length for automatic transitions.
 
 ---
 
-## Moving between machines
+## The golden rules
 
-Copy the same html across and repeat step 1. The only line that changes is
-`host` — `127.0.0.1:1982` when LiveChess is on the same PC, or the LiveChess
-PC's IP when it's separate. Everything you typed in step 2 travels in the file.
+- The `start-overlay.bat` window stays open. Everything else is the admin page.
+- Save buttons go live in ~half a second; nothing needs a refresh.
+- The board never resets from config edits — only changing the board serial
+  (a different physical board) restarts move tracking.
+- The council funder credit stays on unless deliberately toggled off — the
+  wording is the required grant acknowledgement; get council sign-off before
+  changing it.

@@ -38,6 +38,30 @@ const MAX_BODY = 20 * 1024 * 1024;      // 20 MB — covers player photos / spon
    The merged (defaults ⊕ file) object is what /api/config returns, so the
    display always receives a complete shape.
    ------------------------------------------------------------------------ */
+// Zone slot ids: left/centre/right, each whole or split into top+bottom.
+// Nine addressable ids; the ones that render are those consistent with the
+// column split state, and at most six can render at once.
+const ZONE_SLOT_IDS = [
+  "left", "left_top", "left_bottom",
+  "centre", "centre_top", "centre_bottom",
+  "right", "right_top", "right_bottom",
+];
+function defaultZoneSlot() {
+  return {
+    active: false,                       // every slot OFF by default: overlay renders as today
+    source: "sponsors",                  // sponsors | data ("sponsors" with no tier = advertise-here invite)
+    tier: "",                            // premier | major | regular | minor | "" (unassigned)
+    rotate_ms: 8000,                     // sponsor rotation frequency
+    show: "both",                        // image | message | both
+    data_kind: "results",                // tournament_leaderboard | meeting_leaderboard | concurrent_pairings | results
+    data_mode: "manual",                 // auto (Pairingsman, its stage) | manual | hidden
+    data_title: "",
+    data_lines: [],                      // manual content, one display line per entry
+  };
+}
+const DEFAULT_ZONE_SLOTS = {};
+for (const id of ZONE_SLOT_IDS) DEFAULT_ZONE_SLOTS[id] = defaultZoneSlot();
+
 const CONFIG_DEFAULTS = {
   general: {
     event_title: "Club Championship 2026",
@@ -127,10 +151,17 @@ const CONFIG_DEFAULTS = {
   },
 
   zones: {
-    // Six-slot model: left/centre/right, each whole or split top/bottom.
-    // Availability is per scene; the game scene provides right_top/right_bottom
-    // (the existing under-moves panel) unless its bottom strip is enabled.
-    slots: {},
+    // Six-slot model. Availability is per scene (zones.js owns the map):
+    // open scenes (start/versus/postgame/ending) show all columns as a band;
+    // the game scene shows the right column in the side panel under the
+    // moves — unless scenes.json → scenes.game.bottom_strip relocates all
+    // columns into a strip above the footer.
+    columns: {
+      left: { split: false },
+      centre: { split: false },
+      right: { split: false },
+    },
+    slots: DEFAULT_ZONE_SLOTS,
     funder: {                            // Council grant credit — preserved exactly as today
       enabled: true,
       text: "Proudly funded by Greater Shepparton City Council Grant Programs",

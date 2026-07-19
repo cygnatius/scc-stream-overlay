@@ -305,6 +305,67 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
   text-transform:uppercase;color:var(--gold)}
 .ed-next-when{font-family:var(--display);font-weight:800;font-size:40px}
 .ed-next-venue{font-family:'Figtree',sans-serif;font-weight:600;font-size:20px;color:var(--cream-dim)}
+
+/* ==========================================================================
+   ZONES (stage 4) — sponsor / data slot cards. Game-side cards reuse the
+   preserved .sponsors card look; every new class is z-/ad-/s- prefixed so
+   nothing bleeds into the preserved game selectors. With all slots inactive
+   none of this renders and the game scene is identical to the pre-zone
+   overlay.
+   ========================================================================== */
+.sstack{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;width:100%;height:100%;min-height:0}
+.sstack img{max-width:100%;max-height:100%;min-height:0;object-fit:contain}
+.sstack.hasmsg img{max-height:62%}
+.smsg{color:var(--ink);font-family:'Figtree',sans-serif;font-weight:600;
+  font-size:19px;line-height:1.3;text-align:center;padding:0 12px;max-width:100%}
+
+/* "advertise here" invite — active but unassigned zone; designed for stream */
+.advert{position:relative;flex:1;min-height:132px;margin:12px;border-radius:8px;
+  background:var(--cream);display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:7px;overflow:hidden;padding:14px}
+.advert::after{content:"";position:absolute;left:0;right:0;bottom:0;height:5px;background:var(--gold)}
+.ad-head{font-family:var(--display);font-weight:800;font-size:27px;color:var(--ink);line-height:1.05}
+.ad-line{font-family:'Figtree',sans-serif;font-weight:600;font-size:15px;color:#6b5d49}
+.ad-site{font-family:var(--word);font-weight:700;font-size:14px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--brick)}
+
+/* data block (leaderboards / pairings / results) */
+.zdata{flex:1;min-height:132px;margin:12px;border-radius:8px;background:var(--panel-2);
+  border:1px solid rgba(241,231,211,.10);padding:12px 18px;display:flex;
+  flex-direction:column;gap:6px;overflow:hidden;justify-content:center}
+.zrow{font-family:'Figtree',sans-serif;font-weight:600;font-size:18px;color:var(--cream);
+  font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* game bottom strip — config option, default OFF. These rules only apply
+   with the .has-strip class present, so the OFF state is untouched. */
+.sc-game.has-strip{grid-template-rows:84px 1fr 128px 56px}
+.sc-game.has-strip footer{grid-row:4}
+.zstrip{grid-row:3;display:flex;gap:16px;min-height:0}
+.zstrip .zcard{flex:1;min-width:0}
+
+/* open-scene band (start / versus / postgame / ending) */
+.zband{position:absolute;left:70px;right:70px;bottom:26px;display:flex;gap:18px;
+  justify-content:center;z-index:5}
+.zband .zcard{flex:0 1 430px;min-width:0}
+
+/* compact variant used by strip + band */
+.zcard.compact .cap{padding:7px 14px 6px}
+.zcard.compact .cap .t{font-size:13px}
+.zcard.compact .slogo{min-height:76px;margin:9px}
+.zcard.compact .slogo .item{inset:8px}
+.zcard.compact .sname{font-size:22px}
+.zcard.compact .smsg{font-size:15px}
+.zcard.compact .advert{min-height:76px;margin:9px;gap:4px;padding:10px}
+.zcard.compact .ad-head{font-size:21px}
+.zcard.compact .ad-line{font-size:13px}
+.zcard.compact .ad-site{font-size:12px}
+.zcard.compact .zdata{min-height:76px;margin:9px;padding:8px 14px;gap:3px}
+.zcard.compact .zrow{font-size:15px}
+
+/* player photo modes: when a side shows no visual at all (photos_only with
+   no photo, or no_photos) the card collapses the avatar column */
+.pcard.nophoto{grid-template-columns:1fr auto}
 </style>
 </head>
 <body>
@@ -312,7 +373,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 <div class="stage">
 
   <!-- ================= GAME (the original overlay, preserved) ============ -->
-  <section class="scene sc-game" :style="sceneStyle('game')">
+  <section class="scene sc-game" :class="{'has-strip': gameStripZones.length}" :style="sceneStyle('game')">
     <header>
       <div class="brand">
         <div class="crest"><img src="/assets/img/crest.png" alt="Shepparton Chess Club"></div>
@@ -330,16 +391,16 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
     <main>
       <!-- board column: Black (top) · board · White (bottom) -->
       <div class="boardwrap">
-        <div class="pcard" :class="{active: game.toMove==='b'}">
-          <div class="avatar">
+        <div class="pcard" :class="{active: game.toMove==='b', nophoto: !black.showBox}">
+          <div class="avatar" v-if="black.showBox">
             <img v-if="black.photo" :src="black.photo" alt="">
             <template v-else>{{ black.initials }}</template>
           </div>
           <div class="pinfo">
             <div class="pname"><span v-text="black.name"></span><span class="ptitle" v-if="black.title" v-text="black.title"></span></div>
             <div class="pmeta">
-              <span>Rating <b v-text="black.rating"></b></span>
-              <span>Record <span class="rec" v-text="black.record"></span></span>
+              <span v-if="black.rating">Rating <b v-text="black.rating"></b></span>
+              <span v-if="black.record">Record <span class="rec" v-text="black.record"></span></span>
             </div>
           </div>
           <div class="clock" v-text="blackClock"></div>
@@ -347,16 +408,16 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 
         <div class="board" id="board"></div>
 
-        <div class="pcard" :class="{active: game.toMove==='w'}">
-          <div class="avatar">
+        <div class="pcard" :class="{active: game.toMove==='w', nophoto: !white.showBox}">
+          <div class="avatar" v-if="white.showBox">
             <img v-if="white.photo" :src="white.photo" alt="">
             <template v-else>{{ white.initials }}</template>
           </div>
           <div class="pinfo">
             <div class="pname"><span v-text="white.name"></span><span class="ptitle" v-if="white.title" v-text="white.title"></span></div>
             <div class="pmeta">
-              <span>Rating <b v-text="white.rating"></b></span>
-              <span>Record <span class="rec" v-text="white.record"></span></span>
+              <span v-if="white.rating">Rating <b v-text="white.rating"></b></span>
+              <span v-if="white.record">Record <span class="rec" v-text="white.record"></span></span>
             </div>
           </div>
           <div class="clock" v-text="whiteClock"></div>
@@ -370,11 +431,9 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
           <div class="mlist" id="mlist"></div>
         </div>
 
-        <!-- sponsor area: zone content arrives with the zone system (stage 4); hidden meanwhile -->
-        <div class="sponsors" hidden>
-          <div class="cap"><span class="t">Proudly supported by</span></div>
-          <div class="slogo"></div>
-        </div>
+        <!-- zone slots: the right column's game-scene home. No active slots
+             renders nothing at all — exactly the pre-zone layout. -->
+        <zone-card v-for="z in gameSideZones" :key="z.id" :z="z"></zone-card>
 
         <!-- Council grant credit — config: zones.funder -->
         <div class="funder" v-if="funder.enabled && (funder.text || funder.logo)">
@@ -383,6 +442,12 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
         </div>
       </div>
     </main>
+
+    <!-- game bottom strip (config option, default OFF): all three zone
+         columns relocate here when enabled -->
+    <div class="zstrip" v-if="gameStripZones.length">
+      <zone-card v-for="z in gameStripZones" :key="'strip-' + z.id" :z="z" :compact="true"></zone-card>
+    </div>
 
     <footer>
       <div class="live"><span class="dot"></span> Live</div>
@@ -409,6 +474,9 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       <div class="sh-line sh-feature" v-if="featureLine" v-text="featureLine"></div>
       <div class="sh-site" v-text="general.website"></div>
     </div>
+    <div class="zband" v-if="bandZones.length">
+      <zone-card v-for="z in bandZones" :key="'band-' + z.id" :z="z" :compact="true"></zone-card>
+    </div>
   </section>
 
   <!-- ================= VERSUS =========================================== -->
@@ -416,26 +484,29 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
     <div class="vs-brand"><img src="/assets/img/crest.png" alt=""><span>Shepparton Chess Club</span></div>
     <div class="vs-row">
       <div class="vs-player">
-        <div class="vs-avatar">
+        <div class="vs-avatar" v-if="white.showBox">
           <img v-if="white.photo" :src="white.photo" alt="">
           <template v-else>{{ white.initials }}</template>
         </div>
         <div class="vs-tag">White</div>
         <div class="vs-name"><span v-text="white.name"></span><span class="ptitle" v-if="white.title" v-text="white.title"></span></div>
-        <div class="vs-meta">Rating <b v-text="white.rating"></b> &nbsp;·&nbsp; Record <span class="rec" v-text="white.record"></span></div>
+        <div class="vs-meta" v-if="white.rating || white.record"><template v-if="white.rating">Rating <b v-text="white.rating"></b></template><template v-if="white.rating && white.record">&nbsp;·&nbsp;</template><template v-if="white.record">Record <span class="rec" v-text="white.record"></span></template></div>
       </div>
       <div class="vs-mid"><div class="vs-vs">VS</div></div>
       <div class="vs-player">
-        <div class="vs-avatar">
+        <div class="vs-avatar" v-if="black.showBox">
           <img v-if="black.photo" :src="black.photo" alt="">
           <template v-else>{{ black.initials }}</template>
         </div>
         <div class="vs-tag">Black</div>
         <div class="vs-name"><span v-text="black.name"></span><span class="ptitle" v-if="black.title" v-text="black.title"></span></div>
-        <div class="vs-meta">Rating <b v-text="black.rating"></b> &nbsp;·&nbsp; Record <span class="rec" v-text="black.record"></span></div>
+        <div class="vs-meta" v-if="black.rating || black.record"><template v-if="black.rating">Rating <b v-text="black.rating"></b></template><template v-if="black.rating && black.record">&nbsp;·&nbsp;</template><template v-if="black.record">Record <span class="rec" v-text="black.record"></span></template></div>
       </div>
     </div>
     <div class="vs-foot"><b v-text="general.event_title"></b><span v-if="general.round"> &nbsp;·&nbsp; <span v-text="general.round"></span></span><span v-if="general.time_control"> &nbsp;·&nbsp; <span v-text="general.time_control"></span></span></div>
+    <div class="zband" v-if="bandZones.length">
+      <zone-card v-for="z in bandZones" :key="'band-' + z.id" :z="z" :compact="true"></zone-card>
+    </div>
   </section>
 
   <!-- ================= POSTGAME ========================================= -->
@@ -443,29 +514,32 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
     <div class="vs-brand"><img src="/assets/img/crest.png" alt=""><span>Shepparton Chess Club</span></div>
     <div class="vs-row">
       <div class="vs-player">
-        <div class="vs-avatar">
+        <div class="vs-avatar" v-if="white.showBox">
           <img v-if="white.photo" :src="white.photo" alt="">
           <template v-else>{{ white.initials }}</template>
         </div>
         <div class="vs-tag">White</div>
         <div class="vs-name"><span v-text="white.name"></span><span class="ptitle" v-if="white.title" v-text="white.title"></span></div>
-        <div class="vs-meta">Rating <b v-text="white.rating"></b> &nbsp;·&nbsp; Record <span class="rec" v-text="white.record"></span></div>
+        <div class="vs-meta" v-if="white.rating || white.record"><template v-if="white.rating">Rating <b v-text="white.rating"></b></template><template v-if="white.rating && white.record">&nbsp;·&nbsp;</template><template v-if="white.record">Record <span class="rec" v-text="white.record"></span></template></div>
       </div>
       <div class="vs-mid">
         <div class="banner sm" v-text="postResult ? 'Final result' : 'Game complete'"></div>
         <div class="pg-result" v-if="postResult" v-text="postResult"></div>
       </div>
       <div class="vs-player">
-        <div class="vs-avatar">
+        <div class="vs-avatar" v-if="black.showBox">
           <img v-if="black.photo" :src="black.photo" alt="">
           <template v-else>{{ black.initials }}</template>
         </div>
         <div class="vs-tag">Black</div>
         <div class="vs-name"><span v-text="black.name"></span><span class="ptitle" v-if="black.title" v-text="black.title"></span></div>
-        <div class="vs-meta">Rating <b v-text="black.rating"></b> &nbsp;·&nbsp; Record <span class="rec" v-text="black.record"></span></div>
+        <div class="vs-meta" v-if="black.rating || black.record"><template v-if="black.rating">Rating <b v-text="black.rating"></b></template><template v-if="black.rating && black.record">&nbsp;·&nbsp;</template><template v-if="black.record">Record <span class="rec" v-text="black.record"></span></template></div>
       </div>
     </div>
     <div class="vs-foot"><b v-text="general.event_title"></b><span v-if="general.round"> &nbsp;·&nbsp; <span v-text="general.round"></span></span></div>
+    <div class="zband" v-if="bandZones.length">
+      <zone-card v-for="z in bandZones" :key="'band-' + z.id" :z="z" :compact="true"></zone-card>
+    </div>
   </section>
 
   <!-- ================= INTERMISSION ===================================== -->
@@ -499,6 +573,9 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       </div>
       <div class="sh-site" v-text="general.website"></div>
     </div>
+    <div class="zband" v-if="bandZones.length">
+      <zone-card v-for="z in bandZones" :key="'band-' + z.id" :z="z" :compact="true"></zone-card>
+    </div>
   </section>
 
   <!-- fade-through-black curtain -->
@@ -518,13 +595,39 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 <script src="/js/moves.js"></script>
 <script src="/js/livechess.js"></script>
 <script src="/js/scenes.js"></script>
+<script src="/js/zones.js"></script>
+
+<!-- zone slot card template (see the zone-card component in the boot script) -->
+<script type="text/x-template" id="tpl-zone-card">
+<div class="sponsors zcard" :class="{compact: compact}">
+  <div class="cap"><span class="t" v-text="z.cap"></span></div>
+  <div class="slogo" v-if="z.kind === 'sponsor'">
+    <div class="item" v-for="(sp, i) in z.list" :key="i" :class="{show: i === z.idx}">
+      <div class="sstack" :class="{hasmsg: z.show !== 'image' && sp.message}">
+        <img v-if="z.show !== 'message' && sp.image" :src="'/assets/sponsors/' + encodeURIComponent(sp.image)" :alt="sp.name">
+        <div class="sname" v-if="!(z.show !== 'message' && sp.image)" v-text="sp.name"></div>
+        <div class="smsg" v-if="z.show !== 'image' && sp.message" v-text="sp.message"></div>
+      </div>
+    </div>
+  </div>
+  <div class="advert" v-else-if="z.kind === 'advertise'">
+    <div class="ad-head">Your business here</div>
+    <div class="ad-line">Partner with Shepparton Chess Club</div>
+    <div class="ad-site" v-text="website"></div>
+  </div>
+  <div class="zdata" v-else>
+    <div class="zrow" v-for="(ln, i) in z.lines" :key="i" v-text="ln"></div>
+  </div>
+</div>
+</script>
+
 <script>
 /* =========================================================================
    BOOT — reactive game state, Vue mount, scenes, config poll, LiveChess.
    ========================================================================= */
 "use strict";
 (function () {
-  console.info("SCC overlay build: modular stage2 2026-07-19");
+  console.info("SCC overlay build: modular stage4 2026-07-20");
 
   const { createApp, reactive, computed, watch } = Vue;
 
@@ -550,6 +653,10 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 
   const cfg = SCC.config.store;
   const sceneView = SCC.scenes.view;
+  // Init zones BEFORE mount: the zone computeds must find the store on their
+  // very first run — an early [] return with no reactive read would freeze
+  // them empty forever (computeds only re-run when a tracked dep changes).
+  SCC.zones.init(cfg);
 
   function initials(name) { return name.split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase(); }
   function fmtTimeHM(s) {
@@ -564,12 +671,18 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       const demo = !!cfg.data.board.demo_mode;
       const src = demo ? SCC.livechess.DEMO[side]
         : ((cfg.data.players.manual && cfg.data.players.manual[side]) || {});
+      const mode = cfg.data.players.global_photo_mode || "photos_and_avatars";
+      const photo = mode === "no_photos" ? "" : (src.photo || src.avatar || "");
       return {
         name: src.name || "—",
         title: src.title || "",
-        rating: src.rating || "—",
-        record: src.record || "—",
-        photo: src.photo || src.avatar || "",
+        rating: src.rating == null ? "" : String(src.rating),
+        record: src.record || "",
+        photo,
+        // photos_and_avatars: photo, else initials avatar. photos_only:
+        // photo or nothing. no_photos: nothing — the card collapses the
+        // avatar cell (.nophoto).
+        showBox: mode === "no_photos" ? false : (!!photo || mode === "photos_and_avatars"),
         initials: initials(src.name || "?"),
       };
     });
@@ -646,14 +759,33 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
         return !!iv.video;
       });
 
+      /* zones (stage 4) — read reactive config + rotation state, so sponsor
+         crossfades and config edits re-render without any explicit wiring */
+      const bandZones = computed(() => SCC.zones.bandZones());
+      const gameSideZones = computed(() => SCC.zones.gameSideZones());
+      const gameStripZones = computed(() => SCC.zones.gameStripZones());
+
       return {
         game, general, boardLabel, roundLabel, socials, funder, white, black,
         whiteClock, blackClock, moveStatus, cfgStale,
         sceneStyle, curtainStyle, startTimesLine, featureLine, postResult,
         nextBroadcast, ivHasVideo,
+        bandZones, gameSideZones, gameStripZones,
       };
     },
   });
+
+  /* Zone slot card — one template for the game side panel, the bottom strip
+     and the open-scene bands (compact). Sponsor items stay stacked and
+     crossfade via the original .slogo .item.show opacity transition. */
+  app.component("zone-card", {
+    props: { z: { type: Object, required: true }, compact: { type: Boolean, default: false } },
+    computed: {
+      website() { return SCC.config.store.data.general.website || "sheppartonchess.club"; },
+    },
+    template: "#tpl-zone-card",
+  });
+
   app.mount("#app");
 
   /* Imperative render islands — original board / move-list renderers. */

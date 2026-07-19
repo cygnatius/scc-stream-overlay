@@ -148,6 +148,32 @@ button.rowdel:hover{border-color:var(--err);color:var(--err)}
 .match .colhead{font-family:'Playfair Display',serif;font-weight:800;font-size:17px;margin-bottom:10px}
 @media (max-width:820px){.match{grid-template-columns:1fr}.scenebtns{grid-template-columns:repeat(3,1fr)}}
 
+/* sponsors / zones / roster editors (stage 4) */
+.sprow{display:grid;grid-template-columns:22px 170px 105px 150px 46px 1fr 1fr auto;gap:8px;align-items:center}
+.plrow{display:grid;grid-template-columns:46px 165px 150px 82px 85px 150px auto auto auto;gap:8px;align-items:center}
+.thumb{width:46px;height:38px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;
+  display:grid;place-items:center;overflow:hidden;flex:none}
+.thumb img{max-width:100%;max-height:100%;object-fit:contain}
+.thumb.round{height:46px;border-radius:8px}
+.thumb.round img{width:100%;height:100%;object-fit:cover}
+.scenechips{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--cream-dim);margin-bottom:6px}
+.chip{padding:5px 12px;border-radius:999px;font-size:13px;text-transform:capitalize}
+.chip.on{background:var(--gold);color:var(--bg-deep);border-color:var(--gold)}
+.warn4{margin:10px 0 4px;background:var(--panel-2);border:1px solid var(--gold);color:var(--gold);
+  border-radius:8px;padding:10px 14px;font-weight:700;font-size:14px}
+.zonecols{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:12px}
+.zonecol{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+  display:flex;flex-direction:column;gap:10px;transition:opacity .2s}
+.zonecol.dimmed{opacity:.4}
+.zonecol h3{margin:0;display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+  text-transform:capitalize;font-size:13px;letter-spacing:.1em;color:var(--cream)}
+.colnote{font-size:10px;letter-spacing:.04em;color:var(--brick);text-transform:none;font-weight:700}
+.slotbox{border:1px solid rgba(241,231,211,.10);border-radius:8px;padding:10px;display:flex;
+  flex-direction:column;gap:8px;background:var(--panel)}
+.slotbox b{text-transform:capitalize}
+textarea{resize:vertical}
+@media (max-width:980px){.zonecols{grid-template-columns:1fr}.sprow,.plrow{grid-template-columns:1fr 1fr;grid-auto-rows:auto}}
+
 /* toasts */
 .toasts{position:fixed;right:22px;bottom:22px;display:flex;flex-direction:column;gap:8px;z-index:50}
 .toast{background:var(--panel-2);border:1px solid var(--gold);color:var(--cream);border-radius:8px;
@@ -508,10 +534,183 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     </div>
   </section>
 
+  <!-- ======================= SPONSORS & ZONES ======================= -->
+  <section v-if="cfg" v-show="tab === 'zones'">
+    <div class="card">
+      <h2>Sponsors</h2>
+      <p class="sub">The sponsor pool. Zones below assign a tier and rotate through the <b>active</b> sponsors in it. Logos live in <code>assets/sponsors/</code> — upload here, or drop files in the folder and Rescan. A sponsor's optional header replaces “Proudly supported by” while it is on screen.</p>
+      <div class="btns" style="margin-bottom:12px">
+        <button class="ghost" @click="pickUpload('sponsors')">Upload logo…</button>
+        <button class="ghost" @click="loadAssets('sponsors', true)">Rescan folder</button>
+      </div>
+      <div class="rows">
+        <div class="sprow" v-for="(s, i) in drafts.sponsors.list" :key="i">
+          <input type="checkbox" v-model="s.active" title="Active — eligible for zones">
+          <input type="text" v-model="s.name" placeholder="Sponsor name">
+          <select v-model="s.tier"><option v-for="t in TIERS" :value="t">{{ t }}</option></select>
+          <select v-model="s.image">
+            <option value="">no image</option>
+            <option v-for="f in assets.sponsors" :key="f.name" :value="f.name">{{ f.name }}</option>
+          </select>
+          <span class="thumb"><img v-if="s.image" :src="'/assets/sponsors/' + encodeURIComponent(s.image)" alt=""></span>
+          <input type="text" v-model="s.header" placeholder="Header (optional)">
+          <input type="text" v-model="s.message" placeholder="Message (optional)">
+          <button class="rowdel" @click="drafts.sponsors.list.splice(i, 1)">✕</button>
+        </div>
+        <div><button class="ghost" @click="drafts.sponsors.list.push({name:'', tier:'regular', image:'', message:'', header:'', active:true})">+ Add sponsor</button></div>
+      </div>
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.sponsors">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.sponsors">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.sponsors" @click="revert('sponsors')">Revert</button>
+        <button class="primary" :disabled="!dirty.sponsors || saving" @click="saveSponsors">Save sponsors</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Zones</h2>
+      <p class="sub">Three columns — left, centre, right — each whole or split into top + bottom (six slots at most). Open scenes (start, versus, postgame, ending) show every column as a bottom band; the <b>game scene shows the right column under the moves</b>, and the funder credit stays beneath it. A slot with no tier assigned shows the designed “advertise here” invite.</p>
+
+      <div class="scenechips">
+        <span>Availability in scene:</span>
+        <button v-for="s in SCENES" :key="s" class="chip" :class="{on: zoneScene === s}" @click="zoneScene = s">{{ s }}</button>
+      </div>
+      <label class="chk" style="margin:8px 0 2px">
+        <input type="checkbox" :checked="stripOn" @change="setStrip($event.target.checked)">
+        Game-scene bottom strip
+        <small>&nbsp;— relocates all three columns into a strip above the game footer (left and centre gain a game-scene home; right moves down with them so nothing shows twice). OFF = the game scene renders exactly as today.</small>
+      </label>
+      <div class="warn4" v-if="activeSlotCount > 4">⚠ {{ activeSlotCount }} slots active — four is the practical on-stream limit. The display renders them all, but consider deactivating some.</div>
+
+      <div class="zonecols">
+        <div class="zonecol" v-for="col in COLS" :key="col" :class="{dimmed: colDimmed(col)}">
+          <h3>{{ col }}<span class="colnote" v-if="colDimmed(col)">not in {{ zoneScene }}{{ zoneScene === 'game' ? ' — enable the strip' : '' }}</span></h3>
+          <label class="chk"><input type="checkbox" v-model="drafts.zones.cols[col].split"> Split into top + bottom</label>
+          <div class="slotbox" v-for="id in colSlotIds(col)" :key="id">
+            <label class="chk"><input type="checkbox" v-model="drafts.zones.slots[id].active"> <b>{{ slotLabel(id) }}</b></label>
+            <template v-if="drafts.zones.slots[id].active">
+              <select v-model="drafts.zones.slots[id].srcSel">
+                <option value="advertise">“Advertise here” invite</option>
+                <option v-for="t in TIERS" :key="t" :value="'tier:' + t">Sponsors — {{ t }}</option>
+                <option value="data">Data block</option>
+              </select>
+              <template v-if="String(drafts.zones.slots[id].srcSel).startsWith('tier:')">
+                <div class="unit"><input type="number" min="2" step="1" v-model="drafts.zones.slots[id].rotate_s"><span>s rotation</span></div>
+                <select v-model="drafts.zones.slots[id].show">
+                  <option value="both">image + message</option>
+                  <option value="image">image only</option>
+                  <option value="message">message only</option>
+                </select>
+              </template>
+              <template v-if="drafts.zones.slots[id].srcSel === 'data'">
+                <select v-model="drafts.zones.slots[id].data_kind">
+                  <option value="tournament_leaderboard">Tournament leaderboard</option>
+                  <option value="meeting_leaderboard">Meeting leaderboard</option>
+                  <option value="concurrent_pairings">Concurrent pairings</option>
+                  <option value="results">Results</option>
+                </select>
+                <select v-model="drafts.zones.slots[id].data_mode">
+                  <option value="manual">Manual — lines below</option>
+                  <option value="auto">Auto — Pairingsman (its stage; falls back to the lines)</option>
+                  <option value="hidden">Hidden</option>
+                </select>
+                <input type="text" v-model="drafts.zones.slots[id].data_title" placeholder="Title (optional)">
+                <textarea rows="3" v-model="drafts.zones.slots[id].lines" placeholder="One display line per row"></textarea>
+              </template>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.zones">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.zones">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.zones" @click="revert('zones')">Revert</button>
+        <button class="primary" :disabled="!dirty.zones || saving" @click="saveZones">Save zones</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Council funder credit</h2>
+      <p class="sub">The Greater Shepparton City Council acknowledgement under the moves panel — preserved exactly as it renders today. The wording is the required funder credit: <b>get council sign-off before changing it on stream.</b></p>
+      <div class="frm">
+        <div class="f wide">
+          <label class="chk" style="text-transform:none;letter-spacing:0">
+            <input type="checkbox" v-model="drafts.funder.enabled"> Show the funder credit
+          </label>
+        </div>
+        <div class="f wide"><label>Text</label><input type="text" v-model="drafts.funder.text"></div>
+        <div class="f wide"><label>Logo path</label><input type="text" v-model="drafts.funder.logo" placeholder="/assets/img/gscc-white.png"></div>
+      </div>
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.funder">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.funder">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.funder" @click="revert('funder')">Revert</button>
+        <button class="primary" :disabled="!dirty.funder || saving" @click="saveFunder">Save funder credit</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ PLAYERS ============================ -->
+  <section v-if="cfg" v-show="tab === 'players'">
+    <div class="card">
+      <h2>Photo policy</h2>
+      <div class="frm">
+        <div class="f wide">
+          <select v-model="drafts.roster.mode">
+            <option value="photos_and_avatars">Photos where available, initials avatar otherwise</option>
+            <option value="photos_only">Photos only — players without a photo show no visual</option>
+            <option value="no_photos">No photos and no avatars</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:10px">Applies everywhere a player appears (game cards, versus, postgame). A player with photo use off is treated as having no photo. Saved with the roster below.</p>
+    </div>
+
+    <div class="card">
+      <h2>Roster</h2>
+      <p class="sub">Club players with photos, ratings and records (either 1–4 or 4–1–2 style). “→ White / → Black” copies a player into the manual match fields on the Live tab — photo included when photo use is on; the title clears, set it there if needed. Photos live in <code>assets/players/</code>.</p>
+      <div class="btns" style="margin-bottom:12px">
+        <button class="ghost" @click="pickUpload('players')">Upload photo…</button>
+        <button class="ghost" @click="loadAssets('players', true)">Rescan folder</button>
+      </div>
+      <div class="rows">
+        <div class="plrow" v-for="(p, i) in drafts.roster.list" :key="i">
+          <span class="thumb round"><img v-if="p.photo" :src="'/assets/players/' + encodeURIComponent(p.photo)" alt=""></span>
+          <input type="text" v-model="p.name" placeholder="Display name">
+          <select v-model="p.photo">
+            <option value="">no photo</option>
+            <option v-for="f in assets.players" :key="f.name" :value="f.name">{{ f.name }}</option>
+          </select>
+          <label class="chk" title="Per-player photo use"><input type="checkbox" v-model="p.use_photo"> photo</label>
+          <input type="text" v-model="p.rating" placeholder="rating">
+          <input type="text" v-model="p.record" placeholder="record">
+          <button @click="assignSide('white', p)">→ White</button>
+          <button @click="assignSide('black', p)">→ Black</button>
+          <button class="rowdel" @click="drafts.roster.list.splice(i, 1)">✕</button>
+        </div>
+        <div><button class="ghost" @click="drafts.roster.list.push({name:'', photo:'', use_photo:true, rating:'', record:''})">+ Add player</button></div>
+      </div>
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.roster">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.roster">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.roster" @click="revert('roster')">Revert</button>
+        <button class="primary" :disabled="!dirty.roster || saving" @click="saveRoster">Save roster &amp; photo policy</button>
+      </div>
+    </div>
+  </section>
+
   <p class="footnote">
     Display page for OBS: <a href="/display.html" target="_blank">/display.html</a> (1920×1080 browser source).
     Config lives in <code>config/*.json</code>; hand edits are picked up live and appear here unless a tab has unsaved changes.
   </p>
+
+  <input type="file" id="upSponsors" accept=".png,.jpg,.jpeg,.webp,.gif,.svg" style="display:none" @change="onUpload('sponsors', $event)">
+  <input type="file" id="upPlayers" accept=".png,.jpg,.jpeg,.webp,.gif,.svg" style="display:none" @change="onUpload('players', $event)">
 
   <div class="toasts"><div class="toast" v-for="t in toasts" :key="t.id" :class="{err: t.kind==='err'}">{{ t.msg }}</div></div>
 </div>
@@ -521,19 +720,27 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
 <script>
 "use strict";
 (function () {
-  const { createApp, reactive, computed } = Vue;
+  const { createApp, reactive, computed, ref } = Vue;
 
   const SCENES = ["start", "versus", "game", "postgame", "intermission", "ending"];
   const TTYPES = ["cut", "fade", "crossfade", "slide", "wipe"];
   const DIRS = ["left", "right", "up", "down"];
+  const TIERS = ["premier", "major", "regular", "minor"];
+  const COLS = ["left", "centre", "right"];
+  const KINDS = ["tournament_leaderboard", "meeting_leaderboard", "concurrent_pairings", "results"];
+  const SLOT_IDS = [
+    "left", "left_top", "left_bottom",
+    "centre", "centre_top", "centre_bottom",
+    "right", "right_top", "right_bottom",
+  ];
   const TABS = [
     { id: "live", label: "Live" },
     { id: "event", label: "Event" },
     { id: "board", label: "Board" },
     { id: "transitions", label: "Transitions" },
     { id: "intermission", label: "Intermission" },
-    { id: "zones", label: "Sponsors & Zones", soon: "stage 4" },
-    { id: "players", label: "Players", soon: "stage 4" },
+    { id: "zones", label: "Sponsors & Zones" },
+    { id: "players", label: "Players" },
     { id: "pairingsman", label: "Pairingsman", soon: "stage 6" },
   ];
 
@@ -669,7 +876,59 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     return { white: side("white"), black: side("black") };
   }
 
-  const DRAFTERS = { event: draftEvent, board: draftBoard, trans: draftTrans, inter: draftInter, match: draftMatch };
+  function draftSponsors(c) {
+    return {
+      list: (c.sponsors.sponsors || []).map(s => ({
+        name: s.name || "", tier: TIERS.includes(s.tier) ? s.tier : "regular",
+        image: s.image || "", message: s.message || "", header: s.header || "",
+        active: s.active !== false,
+      })),
+    };
+  }
+
+  function draftZones(c) {
+    const z = c.zones || {};
+    const cols = {};
+    for (const col of COLS) cols[col] = { split: !!(((z.columns || {})[col]) || {}).split };
+    const slots = {};
+    for (const id of SLOT_IDS) {
+      const s = (z.slots || {})[id] || {};
+      slots[id] = {
+        active: !!s.active,
+        // one select drives the content assignment: a sponsor tier, the
+        // advertise-here invite (sponsors + no tier), or a data block
+        srcSel: s.source === "data" ? "data" : (TIERS.includes(s.tier) ? "tier:" + s.tier : "advertise"),
+        rotate_s: (Number(s.rotate_ms) || 8000) / 1000,
+        show: ["image", "message", "both"].includes(s.show) ? s.show : "both",
+        data_kind: KINDS.includes(s.data_kind) ? s.data_kind : "results",
+        data_mode: ["auto", "manual", "hidden"].includes(s.data_mode) ? s.data_mode : "manual",
+        data_title: s.data_title || "",
+        lines: (Array.isArray(s.data_lines) ? s.data_lines : []).join("\n"),
+      };
+    }
+    return { cols, slots };
+  }
+
+  function draftFunder(c) {
+    const f = (c.zones || {}).funder || {};
+    return { enabled: f.enabled !== false, text: f.text || "", logo: f.logo || "" };
+  }
+
+  function draftRoster(c) {
+    return {
+      mode: ["photos_and_avatars", "photos_only", "no_photos"].includes(c.players.global_photo_mode)
+        ? c.players.global_photo_mode : "photos_and_avatars",
+      list: (c.players.roster || []).map(p => ({
+        name: p.name || "", photo: p.photo || "", use_photo: p.use_photo !== false,
+        rating: p.rating == null ? "" : String(p.rating), record: p.record || "",
+      })),
+    };
+  }
+
+  const DRAFTERS = {
+    event: draftEvent, board: draftBoard, trans: draftTrans, inter: draftInter, match: draftMatch,
+    sponsors: draftSponsors, zones: draftZones, funder: draftFunder, roster: draftRoster,
+  };
 
   /* ------------------------------------------------------------ state */
 
@@ -682,9 +941,12 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     tab: "live",
     saving: false,
     videos: [],
+    assets: { sponsors: [], players: [] },
   });
-  const drafts = reactive({ event: null, board: null, trans: null, inter: null, match: null, result: "" });
-  const baselines = reactive({ event: "", board: "", trans: "", inter: "", match: "" });
+  const drafts = reactive({ event: null, board: null, trans: null, inter: null, match: null,
+    sponsors: null, zones: null, funder: null, roster: null, result: "" });
+  const baselines = reactive({ event: "", board: "", trans: "", inter: "", match: "",
+    sponsors: "", zones: "", funder: "", roster: "" });
   const errs = reactive({ event: "", board: "", trans: "", inter: "" });
   const toasts = reactive([]);
   let toastId = 0;
@@ -734,6 +996,43 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     }
   }
 
+  async function loadAssets(kind, announce) {
+    try {
+      const j = await getJSON("/api/assets/" + kind);
+      state.assets[kind] = j.files || [];
+      if (announce) toast("assets/" + kind + " rescanned — " + state.assets[kind].length + " file(s) found");
+    } catch (e) {
+      if (announce) toast("Could not list assets/" + kind, "err");
+    }
+  }
+
+  function pickUpload(kind) {
+    document.getElementById(kind === "sponsors" ? "upSponsors" : "upPlayers").click();
+  }
+
+  async function onUpload(kind, ev) {
+    const f = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!f) return;
+    try {
+      const data = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result).split(",")[1] || "");
+        r.onerror = () => rej(new Error("could not read the file"));
+        r.readAsDataURL(f);
+      });
+      const r = await fetch("/api/asset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, filename: f.name, data }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || "upload failed");
+      toast("Uploaded " + j.name + " — pick it in a row below");
+      loadAssets(kind, false);
+    } catch (e) { toast("Upload failed — " + e.message, "err"); }
+  }
+
   /* --------------------------------------------------- scene commands
      Read-modify-write scenes.json; runtime keys come off disk fresh, so a
      command never resurrects a stale sequence or pending action. */
@@ -779,6 +1078,14 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       sc.scenes.postgame = Object.assign({}, sc.scenes.postgame, { result_text: String(text || "").trim() });
     }, text ? "Postgame result set: " + text : "Postgame result cleared");
   };
+
+  // Game-scene bottom strip: a scenes.json key, but operationally a zone
+  // switch — instant toggle like demo mode.
+  const setStrip = (on) => mutateScenes(sc => {
+    sc.scenes = sc.scenes || {};
+    sc.scenes.game = Object.assign({}, sc.scenes.game, { bottom_strip: !!on });
+  }, on ? "Bottom strip ON — game-scene zones relocate into the strip"
+        : "Bottom strip OFF — game scene renders exactly as today");
 
   async function setDemo(on) {
     try {
@@ -960,6 +1267,112 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     });
   }
 
+  async function saveSponsors() {
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        c.sponsors.sponsors = drafts.sponsors.list
+          .filter(s => (s.name || "").trim() || s.image)
+          .map(s => ({
+            name: (s.name || "").trim(), tier: TIERS.includes(s.tier) ? s.tier : "regular",
+            image: s.image || "", message: (s.message || "").trim(), header: (s.header || "").trim(),
+            active: !!s.active,
+          }));
+        await postConfig("sponsors", c.sponsors);
+        state.cfg = c; rebuildDraft("sponsors", true);
+        toast("Sponsors saved");
+      } catch (e) { toast("Sponsors save failed — " + e.message, "err"); }
+    });
+  }
+
+  async function saveZones() {
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        const d = drafts.zones;
+        c.zones.columns = {};
+        for (const col of COLS) c.zones.columns[col] = { split: !!d.cols[col].split };
+        c.zones.slots = c.zones.slots || {};
+        for (const id of SLOT_IDS) {
+          const s = d.slots[id];
+          c.zones.slots[id] = Object.assign({}, c.zones.slots[id], {
+            active: !!s.active,
+            source: s.srcSel === "data" ? "data" : "sponsors",
+            tier: String(s.srcSel).startsWith("tier:") ? s.srcSel.slice(5) : "",
+            rotate_ms: Math.round(toNum(s.rotate_s, 8, 2) * 1000),
+            show: ["image", "message", "both"].includes(s.show) ? s.show : "both",
+            data_kind: KINDS.includes(s.data_kind) ? s.data_kind : "results",
+            data_mode: ["auto", "manual", "hidden"].includes(s.data_mode) ? s.data_mode : "manual",
+            data_title: String(s.data_title || "").trim(),
+            data_lines: String(s.lines || "").split("\n").map(l => l.trim()).filter(Boolean),
+          });
+        }
+        await postConfig("zones", c.zones);          // funder rides through fresh, untouched
+        state.cfg = c; rebuildDraft("zones", true);
+        toast("Zones saved");
+      } catch (e) { toast("Zones save failed — " + e.message, "err"); }
+    });
+  }
+
+  async function saveFunder() {
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        const d = drafts.funder;
+        c.zones.funder = Object.assign({}, c.zones.funder, {
+          enabled: !!d.enabled, text: String(d.text || "").trim(), logo: String(d.logo || "").trim(),
+        });
+        await postConfig("zones", c.zones);          // columns/slots ride through fresh
+        state.cfg = c; rebuildDraft("funder", true);
+        toast("Funder credit saved");
+      } catch (e) { toast("Funder save failed — " + e.message, "err"); }
+    });
+  }
+
+  async function saveRoster() {
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        const d = drafts.roster;
+        c.players.global_photo_mode = ["photos_and_avatars", "photos_only", "no_photos"].includes(d.mode)
+          ? d.mode : "photos_and_avatars";
+        c.players.roster = d.list
+          .filter(p => (p.name || "").trim())
+          .map(p => {
+            const rating = String(p.rating || "").trim();
+            return {
+              name: p.name.trim(), photo: p.photo || "", use_photo: !!p.use_photo,
+              rating: rating === "" ? null : (/^\d+$/.test(rating) ? Number(rating) : rating),
+              record: (p.record || "").trim(),
+            };
+          });
+        await postConfig("players", c.players);      // manual white/black preserved from fresh
+        state.cfg = c; rebuildDraft("roster", true);
+        toast("Roster & photo policy saved");
+      } catch (e) { toast("Roster save failed — " + e.message, "err"); }
+    });
+  }
+
+  // Copy a roster player into the manual match fields (Live tab). This is an
+  // explicit overwrite of that side, photo included when photo use is on;
+  // the title clears because the roster record carries none.
+  async function assignSide(side, p) {
+    try {
+      const c = await freshConfig();
+      const rating = String(p.rating || "").trim();
+      c.players.manual = c.players.manual || {};
+      c.players.manual[side] = Object.assign({}, c.players.manual[side], {
+        name: (p.name || "").trim(), title: "",
+        rating: rating === "" ? null : (/^\d+$/.test(rating) ? Number(rating) : rating),
+        record: (p.record || "").trim(),
+        photo: (p.use_photo && p.photo) ? "/assets/players/" + encodeURIComponent(p.photo) : "",
+      });
+      await postConfig("players", c.players);
+      state.cfg = c; rebuildDraft("match", true);
+      toast((p.name || "Player") + " → " + (side === "white" ? "White" : "Black"));
+    } catch (e) { toast("Assign failed — " + e.message, "err"); }
+  }
+
   /* ------------------------------------------------------------- app */
 
   createApp({
@@ -1026,8 +1439,32 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         if (id === "board") return dirty.value.board;
         if (id === "transitions") return dirty.value.trans;
         if (id === "intermission") return dirty.value.inter;
+        if (id === "zones") return dirty.value.sponsors || dirty.value.zones || dirty.value.funder;
+        if (id === "players") return dirty.value.roster;
         return false;
       };
+
+      /* ---- zones tab: per-scene availability context ---- */
+      const zoneScene = ref("game");
+      const stripOn = computed(() =>
+        !!(state.cfg && (((state.cfg.scenes.scenes || {}).game) || {}).bottom_strip));
+      // A column is dimmed when the selected scene's geometry can't render it:
+      // intermission is full-bleed video (no zones at all); the game scene
+      // only provides the right column until the strip relocates all three.
+      const colDimmed = (col) => {
+        if (zoneScene.value === "intermission") return true;
+        if (zoneScene.value === "game") return !stripOn.value && col !== "right";
+        return false;
+      };
+      const colSlotIds = (col) =>
+        drafts.zones && drafts.zones.cols[col].split ? [col + "_top", col + "_bottom"] : [col];
+      const slotLabel = (id) => id.replace("_", " — ");
+      const activeSlotCount = computed(() => {
+        if (!drafts.zones) return 0;
+        let n = 0;
+        for (const col of COLS) for (const id of colSlotIds(col)) if (drafts.zones.slots[id].active) n++;
+        return n;
+      });
       const revert = (t) => { rebuildDraft(t, true); if (errs[t] !== undefined) errs[t] = ""; };
 
       const configuredVideoMissing = computed(() =>
@@ -1049,23 +1486,29 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       function switchTab(id) {
         state.tab = id;
         if (id === "intermission") loadVideos(false);
+        if (id === "zones") loadAssets("sponsors", false);
+        if (id === "players") loadAssets("players", false);
       }
 
       loadVideos(false);
       poll();
 
       return {
-        SCENES, TTYPES, DIRS, tabs: TABS,
+        SCENES, TTYPES, DIRS, TIERS, COLS, tabs: TABS,
         cfg, st, beatOk, pendingAuto, autoEnabled, seqCfg, seqInfo, effectiveHostLabel,
         apiOk: computed(() => state.apiOk),
         now: computed(() => state.now),
         tab: computed(() => state.tab),
         saving: computed(() => state.saving),
         videos: computed(() => state.videos),
+        assets: computed(() => state.assets),
         drafts, errs, toasts, dirty, diskChanged, tabDirty,
         switchTab, revert, fmtCountdown, fmtBytes, chapterPreview, configuredVideoMissing,
         setScene, startSeq, stopSeq, cancelPending, setAuto, setDemo, saveResult,
         saveEvent, saveBoard, saveTrans, saveInter, saveMatch, loadVideos,
+        zoneScene, stripOn, colDimmed, colSlotIds, slotLabel, activeSlotCount,
+        setStrip, saveSponsors, saveZones, saveFunder, saveRoster, assignSide,
+        pickUpload, onUpload, loadAssets,
       };
     },
   }).mount("#app");
