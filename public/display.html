@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Shepparton Chess Club — Stream Overlay</title>
+<link href="/vendor/fonts/fonts.css" rel="stylesheet">
+<style>
+/* ==========================================================================
+   SHEPPARTON CHESS CLUB — LIVE STREAM OVERLAY (display page)
+   OBS Browser Source: 1920 x 1080. Theme matched to sheppartonchess.club.
+   Served by server.js; all live values come from the reactive config store
+   (public/js/config.js) and the LiveChess feed (public/js/livechess.js).
+   The CSS below is carried over from scc-stream-overlay.html unchanged apart
+   from: local fonts, local crest, and the tiny config-warning dot.
+   ========================================================================== */
+:root{
+  --bg:#2E2028;          /* club body aubergine */
+  --bg-deep:#1F151B;     /* club nav / darker */
+  --panel:#3A2A33;       /* card panel */
+  --panel-2:#241a20;     /* inner wells */
+  --cream:#F1E7D3;       /* parchment banners */
+  --cream-dim:#cdbfa6;   /* muted parchment text */
+  --gold:#D9A13B;        /* primary accent */
+  --brick:#A9603F;       /* rust/brick secondary (dates, rounds) */
+  --ink:#2b2b3d;         /* dark serif text on cream */
+  --line:rgba(217,161,59,.35);
+  /* site wordmark face (Sitka ships with Windows, so OBS renders it); Playfair falls back */
+  --word:'Sitka Small','Sitka Text','Sitka',sitka1,'Playfair Display',ui-serif,Georgia,serif;
+  --display:'Playfair Display',sitka1,ui-serif,Georgia,serif;
+  --sq-light:#E7D6B4;    /* board light square */
+  --sq-dark:#6B4B39;     /* board dark square */
+  --hi:rgba(217,161,59,.55); /* last-move highlight */
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Figtree',system-ui,sans-serif;color:var(--cream);
+  -webkit-font-smoothing:antialiased}
+#app{display:contents}
+/* faint vintage vignette to echo the site hero */
+.stage::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(120% 90% at 30% 0%,rgba(0,0,0,0) 40%,rgba(0,0,0,.45) 100%);
+  z-index:50}
+
+.stage{position:relative;width:1920px;height:1080px;flex:none;
+  transform-origin:center center;background:var(--bg);display:grid;
+  grid-template-rows:84px 1fr 56px;
+  grid-template-columns:1fr;
+  padding:20px 34px;gap:16px}
+
+/* ---------- angled parchment banner (site signature element) ---------- */
+.banner{position:relative;display:inline-flex;align-items:center;
+  background:var(--cream);color:var(--ink);
+  font-family:'Playfair Display',serif;font-weight:800;
+  letter-spacing:.14em;text-transform:uppercase;
+  padding:8px 30px 10px 22px;
+  clip-path:polygon(0 0,100% 0,calc(100% - 16px) 100%,0 100%);
+  box-shadow:0 6px 14px rgba(0,0,0,.35)}
+.banner.sm{font-size:16px;padding:6px 26px 8px 16px}
+.banner::after{content:"";position:absolute;left:0;bottom:-4px;height:4px;
+  width:100%;background:var(--gold)}
+
+/* ===================== HEADER ===================== */
+header{grid-row:1;display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:18px}
+.crest{height:70px;min-width:56px;border-radius:8px;background:var(--cream);
+  display:flex;align-items:center;justify-content:center;padding:5px 9px;
+  box-shadow:0 6px 14px rgba(0,0,0,.4);position:relative}
+.crest img{height:100%;width:auto;object-fit:contain;display:block}
+.brand h1{font-family:var(--word);font-weight:700;
+  font-size:31px;letter-spacing:.12em;text-transform:uppercase;line-height:1}
+.brand .sub{color:var(--gold);font-family:var(--word);font-weight:600;font-size:14px;
+  letter-spacing:.2em;text-transform:uppercase;margin-top:7px}
+.event{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.event .tname{font-family:var(--display);font-weight:800;font-size:26px}
+.event .round{color:var(--bg);background:var(--gold);font-family:var(--word);font-weight:700;
+  font-size:14px;letter-spacing:.14em;text-transform:uppercase;
+  padding:4px 14px;border-radius:3px}
+
+/* ===================== MAIN ===================== */
+main{grid-row:2;display:grid;grid-template-columns:820px 500px;justify-content:center;gap:32px;min-height:0}
+
+/* ---- board column: Black card · board · White card ---- */
+.boardwrap{display:flex;flex-direction:column;justify-content:center;gap:12px;min-height:0}
+.board{--n:8;position:relative;height:min(740px,100%);aspect-ratio:1/1;
+  flex:0 1 auto;min-height:0;margin:0 auto;
+  border:6px solid var(--cream);border-radius:6px;overflow:hidden;
+  box-shadow:0 18px 40px rgba(0,0,0,.55);display:grid;
+  grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr)}
+.sq{position:relative;display:grid;place-items:center}
+.sq.light{background:var(--sq-light)}
+.sq.dark{background:var(--sq-dark)}
+.sq.hi::before{content:"";position:absolute;inset:0;background:var(--hi)}
+.sq .pc{position:relative;font-size:82px;line-height:1;z-index:2;
+  font-family:'Segoe UI Symbol','Noto Sans Symbols2','Arial Unicode MS',sans-serif}
+.pc.w{color:#FBF6EC;text-shadow:0 0 1px #000,0 2px 3px rgba(0,0,0,.5),
+  -1.5px -1.5px 0 #6b5638,1.5px -1.5px 0 #6b5638,-1.5px 1.5px 0 #6b5638,1.5px 1.5px 0 #6b5638}
+.pc.b{color:#241a20;text-shadow:0 1px 2px rgba(0,0,0,.6),
+  -1px -1px 0 #d9c6a6,1px -1px 0 #d9c6a6,-1px 1px 0 #d9c6a6,1px 1px 0 #d9c6a6}
+.coord{position:absolute;font-size:15px;font-weight:800;opacity:.75;z-index:3;
+  font-family:'Figtree',sans-serif}
+.coord.file{right:5px;bottom:3px}
+.coord.rank{left:5px;top:3px}
+.coord.on-light{color:#6B4B39}.coord.on-dark{color:#E7D6B4}
+
+/* ---- right column: moves + sponsors ---- */
+.side{display:flex;flex-direction:column;gap:16px;min-height:0}
+
+/* player card — slim horizontal bar that flanks the board (top=Black, bottom=White) */
+.pcard{flex:none;background:var(--panel);border:1px solid rgba(241,231,211,.14);
+  border-radius:10px;padding:7px 16px;display:grid;
+  grid-template-columns:48px 1fr auto;column-gap:14px;
+  align-items:center;position:relative;overflow:hidden}
+.pcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--cream)}
+.pcard.active::before{background:var(--gold)}
+.pcard.active{box-shadow:0 0 0 2px var(--gold) inset,0 10px 24px rgba(0,0,0,.35)}
+.avatar{width:48px;height:48px;border-radius:8px;
+  background:var(--panel-2);border:2px solid var(--cream);overflow:hidden;
+  display:grid;place-items:center;font-family:'Playfair Display',serif;
+  font-weight:800;font-size:20px;color:var(--cream-dim)}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.pinfo{min-width:0;display:flex;flex-direction:column;gap:3px}
+.pname{font-family:var(--display);font-weight:800;font-size:25px;
+  line-height:1.0;display:flex;align-items:center;gap:10px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ptitle{font-size:13px;font-weight:800;color:var(--bg);background:var(--gold);
+  padding:2px 7px;border-radius:3px;letter-spacing:.05em}
+.pmeta{display:flex;align-items:center;gap:16px;font-size:14px;color:var(--cream-dim)}
+.pmeta b{color:var(--cream);font-weight:700}
+.pmeta .rec{color:var(--gold);font-weight:800}
+.clock{justify-self:end;align-self:center;
+  font-family:'Figtree',sans-serif;font-variant-numeric:tabular-nums;
+  font-weight:800;font-size:35px;letter-spacing:.02em;
+  background:var(--panel-2);color:var(--cream);
+  padding:5px 16px;border-radius:8px;min-width:166px;text-align:center;
+  border:1px solid rgba(241,231,211,.12)}
+.pcard.active .clock{background:var(--gold);color:var(--bg-deep)}
+.clock.low{color:#e7a; }
+.flag{font-size:20px}
+
+/* moves */
+.moves{flex:1;min-height:0;background:var(--panel);
+  border:1px solid rgba(241,231,211,.14);border-radius:10px;
+  display:flex;flex-direction:column;overflow:hidden}
+.moves .cap{padding:12px 16px 10px;display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid rgba(241,231,211,.12)}
+.moves .cap .t{font-family:var(--word);font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;font-size:16px;color:var(--cream)}
+.moves .cap .st{font-family:var(--word);font-size:13px;color:var(--gold);font-weight:600;letter-spacing:.12em;text-transform:uppercase}
+.mlist{flex:1;overflow:hidden;padding:12px 20px;
+  display:grid;grid-template-columns:46px 1fr 1fr;
+  align-content:start;gap:6px 12px;font-size:23px;
+  font-variant-numeric:tabular-nums}
+.mno{color:var(--cream-dim);text-align:right;padding:6px 8px;font-weight:700}
+.mv{padding:6px 12px;border-radius:5px;font-weight:600}
+.mv.cur{background:var(--gold);color:var(--bg-deep);font-weight:800}
+
+/* ---- sponsors (right column, under the moves) — 0 / 1 / many ---- */
+.sponsors{flex:none;background:var(--panel);
+  border:1px solid rgba(241,231,211,.14);border-radius:10px;
+  display:flex;flex-direction:column;overflow:hidden}
+.sponsors[hidden]{display:none}   /* author display:flex would otherwise defeat [hidden] */
+.sponsors .cap{padding:10px 16px 8px;border-bottom:1px solid rgba(241,231,211,.12)}
+.sponsors .cap .t{font-family:var(--word);font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;font-size:15px;color:var(--cream)}
+.slogo{position:relative;flex:1;min-height:132px;margin:12px;border-radius:8px;
+  background:var(--cream);display:grid;place-items:center;overflow:hidden}
+.slogo .item{position:absolute;inset:16px;display:grid;place-items:center;
+  opacity:0;transition:opacity .6s ease}
+.slogo .item.show{opacity:1}
+.slogo img{max-width:100%;max-height:100%;object-fit:contain}
+.slogo .sname{color:var(--ink);font-family:var(--display);font-weight:800;
+  font-size:30px;text-align:center;letter-spacing:.01em;padding:0 10px}
+
+/* ---- funder credit (Council grant acknowledgement — always on) ---- */
+/* White logo on the deep-dark panel per GSCC accessibility guidance (never a  */
+/* dark logo on a dark bg). Padding gives the logo its required clear space;    */
+/* the logo is used as supplied — not recoloured, stretched or altered.         */
+.funder{flex:none;background:var(--bg-deep);border:1px solid rgba(241,231,211,.10);
+  border-radius:10px;padding:14px 22px;display:flex;align-items:center;
+  justify-content:center;gap:24px}
+.funder[hidden]{display:none}
+.funder .ftext{font-family:var(--word);font-weight:600;font-size:16px;
+  line-height:1.35;letter-spacing:.02em;color:var(--cream);max-width:520px}
+.funder .flogo{height:58px;width:auto;flex:none;display:block}
+
+/* ===================== FOOTER ===================== */
+footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
+  background:var(--bg-deep);border:1px solid rgba(241,231,211,.1);
+  border-radius:10px;padding:0 22px}
+.live{display:flex;align-items:center;gap:12px;font-family:var(--word);font-weight:700;
+  letter-spacing:.16em;text-transform:uppercase;font-size:15px}
+.dot{width:13px;height:13px;border-radius:50%;background:#e23b3b;
+  box-shadow:0 0 0 0 rgba(226,59,59,.6);animation:pulse 1.6s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(226,59,59,.6)}70%{box-shadow:0 0 0 12px rgba(226,59,59,0)}100%{box-shadow:0 0 0 0 rgba(226,59,59,0)}}
+.channels{display:flex;align-items:center;gap:22px;color:var(--cream-dim);
+  font-weight:700;font-size:16px;letter-spacing:.04em}
+.channels b{color:var(--gold)}
+.foot-club{font-family:var(--word);font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;font-size:17px;color:var(--cream)}
+.board-tag{font-family:var(--word);color:var(--gold);font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:14px}
+
+/* ---- subtle connection warning (config poll failing) ------------------- */
+/* Deliberately quiet: a dim gold dot, no red, no icons, no text on stream.   */
+.cfgwarn{position:absolute;left:10px;bottom:10px;width:8px;height:8px;
+  border-radius:50%;background:var(--gold);opacity:.28;z-index:60}
+</style>
+</head>
+<body>
+<div id="app">
+<div class="stage">
+
+  <!-- ============ HEADER ============ -->
+  <header>
+    <div class="brand">
+      <div class="crest"><img src="/assets/img/crest.png" alt="Shepparton Chess Club"></div>
+      <div>
+        <h1>Shepparton Chess Club</h1>
+        <div class="sub" v-text="general.location"></div>
+      </div>
+    </div>
+    <div class="event">
+      <div class="tname" v-text="general.event_title"></div>
+      <div class="round" v-text="roundLabel"></div>
+    </div>
+  </header>
+
+  <!-- ============ MAIN ============ -->
+  <main>
+    <!-- board column: Black (top) · board · White (bottom) -->
+    <div class="boardwrap">
+      <!-- top player (Black) -->
+      <div class="pcard" :class="{active: game.toMove==='b'}">
+        <div class="avatar">
+          <img v-if="black.photo" :src="black.photo" alt="">
+          <template v-else>{{ black.initials }}</template>
+        </div>
+        <div class="pinfo">
+          <div class="pname"><span v-text="black.name"></span><span class="ptitle" v-if="black.title" v-text="black.title"></span></div>
+          <div class="pmeta">
+            <span>Rating <b v-text="black.rating"></b></span>
+            <span>Record <span class="rec" v-text="black.record"></span></span>
+          </div>
+        </div>
+        <div class="clock" v-text="blackClock"></div>
+      </div>
+
+      <div class="board" id="board"></div>
+
+      <!-- bottom player (White) -->
+      <div class="pcard" :class="{active: game.toMove==='w'}">
+        <div class="avatar">
+          <img v-if="white.photo" :src="white.photo" alt="">
+          <template v-else>{{ white.initials }}</template>
+        </div>
+        <div class="pinfo">
+          <div class="pname"><span v-text="white.name"></span><span class="ptitle" v-if="white.title" v-text="white.title"></span></div>
+          <div class="pmeta">
+            <span>Rating <b v-text="white.rating"></b></span>
+            <span>Record <span class="rec" v-text="white.record"></span></span>
+          </div>
+        </div>
+        <div class="clock" v-text="whiteClock"></div>
+      </div>
+    </div>
+
+    <!-- right column: moves + sponsors -->
+    <div class="side">
+      <div class="moves">
+        <div class="cap"><span class="t">Moves</span><span class="st" v-text="moveStatus"></span></div>
+        <div class="mlist" id="mlist"></div>
+      </div>
+
+      <!-- sponsor area: zone content arrives with the zone system (stage 4); hidden meanwhile -->
+      <div class="sponsors" hidden>
+        <div class="cap"><span class="t">Proudly supported by</span></div>
+        <div class="slogo"></div>
+      </div>
+
+      <!-- Council grant credit — config: zones.funder -->
+      <div class="funder" v-if="funder.enabled && (funder.text || funder.logo)">
+        <div class="ftext" v-if="funder.text" v-text="funder.text"></div>
+        <img class="flogo" v-if="funder.logo" :src="funder.logo" alt="Greater Shepparton City Council">
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ FOOTER ============ -->
+  <footer>
+    <div class="live"><span class="dot"></span> Live</div>
+    <div class="channels">
+      Watch the board live on
+      <template v-for="(s, i) in socials" :key="i"><b v-text="s.label"></b><span v-if="i < socials.length - 1">&nbsp;·&nbsp;</span></template>
+    </div>
+    <div class="foot-club" v-text="general.website"></div>
+    <div class="board-tag" v-text="boardLabel"></div>
+  </footer>
+
+  <!-- subtle warning: config poll failing (server unreachable). Last good data stays up. -->
+  <div class="cfgwarn" v-if="cfgStale"></div>
+
+</div>
+</div>
+
+<script src="/vendor/vue.global.js"></script>
+<script src="/vendor/chess-0.10.3.min.js"></script>
+<script src="/js/config.js"></script>
+<script src="/js/clock.js"></script>
+<script src="/js/board.js"></script>
+<script src="/js/moves.js"></script>
+<script src="/js/livechess.js"></script>
+<script>
+/* =========================================================================
+   BOOT — reactive game state, Vue mount, config poll, LiveChess wiring.
+   ========================================================================= */
+"use strict";
+(function () {
+  console.info("SCC overlay build: modular stage1 2026-07-19");
+
+  const { createApp, reactive, computed, watch } = Vue;
+
+  /* Reactive game state — written by livechess.js / moves.js / clock.js,
+     read by the template and the render islands below. Boots to an EMPTY
+     board: fake demo names must never reach air by accident (demo_mode in
+     board.json turns the old demo game back on deliberately). */
+  const game = reactive({
+    fen: SCC.board.EMPTY_PLACEMENT,
+    lastMove: null,
+    toMove: "w",
+    moves: [],
+    currentPly: -1,
+    started: false,
+    demo: false,
+    lcConnected: false,
+    clockRunSide: null,           // 'w' | 'b' | null — see clock.js
+    white: { sec: null },
+    black: { sec: null },
+  });
+  SCC.game = game;
+
+  SCC.moves.init(game);
+  SCC.livechess.init(game);
+  SCC.clock.start(game);
+
+  const cfg = SCC.config.store;
+
+  function initials(name) { return name.split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase(); }
+
+  // Player identity: demo mode shows the original demo players; otherwise the
+  // manual White/Black entries from players.json (Pairingsman arrives later).
+  function playerView(side) {
+    return computed(() => {
+      const demo = !!cfg.data.board.demo_mode;
+      const src = demo ? SCC.livechess.DEMO[side]
+        : ((cfg.data.players.manual && cfg.data.players.manual[side]) || {});
+      return {
+        name: src.name || "—",
+        title: src.title || "",
+        rating: src.rating || "—",
+        record: src.record || "—",
+        photo: src.photo || src.avatar || "",
+        initials: initials(src.name || "?"),
+      };
+    });
+  }
+
+  const app = createApp({
+    setup() {
+      const general = computed(() => cfg.data.general);
+      const boardLabel = computed(() => {
+        const g = cfg.data.general;
+        return g.table_name || ("Board " + (g.table_number || 1));
+      });
+      const roundLabel = computed(() => {
+        const r = cfg.data.general.round;
+        return r ? r + " · " + boardLabel.value : boardLabel.value;
+      });
+      const socials = computed(() => (cfg.data.general.social_links || []).filter(s => s && s.label));
+      const funder = computed(() => (cfg.data.zones && cfg.data.zones.funder) || { enabled: false });
+      const white = playerView("white");
+      const black = playerView("black");
+      const whiteClock = computed(() => game.white.sec != null ? SCC.clock.fmtSec(game.white.sec) : "—:—:—");
+      const blackClock = computed(() => game.black.sec != null ? SCC.clock.fmtSec(game.black.sec) : "—:—:—");
+      const moveStatus = computed(() => (game.toMove === "w" ? "White" : "Black") + " to move");
+      const cfgStale = computed(() => cfg.loaded && !cfg.ok);
+      return { game, general, boardLabel, roundLabel, socials, funder, white, black, whiteClock, blackClock, moveStatus, cfgStale };
+    },
+  });
+  app.mount("#app");
+
+  /* Imperative render islands — the original board / move-list renderers,
+     reused verbatim (board.js / moves.js), driven by watchers. */
+  const boardEl = document.getElementById("board");
+  const mlistEl = document.getElementById("mlist");
+  watch(() => [game.fen, game.lastMove], () => SCC.board.render(boardEl, game), { immediate: true });
+  watch(() => [game.moves.length, game.currentPly], () => SCC.moves.renderList(mlistEl, game), { immediate: true });
+
+  /* Config poll loop → LiveChess wiring. apply() diffs internally, so calling
+     it on every config change is safe: unrelated writes never touch the
+     connection or the move list. */
+  if (typeof Chess === "undefined") {
+    console.warn("chess.js failed to load — check vendor/chess-0.10.3.min.js; board stays empty.");
+  } else {
+    SCC.config.onChange((data) => SCC.livechess.apply(data.board));
+  }
+  SCC.config.start();
+
+  /* scale the fixed 1920x1080 canvas to fit the window; OBS at 1920x1080 renders it 1:1 */
+  function fitStage() {
+    const s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+    document.querySelector(".stage").style.transform = "scale(" + s + ")";
+  }
+  window.addEventListener("resize", fitStage);
+  fitStage();
+})();
+</script>
+</body>
+</html>
