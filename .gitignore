@@ -2,6 +2,15 @@
 config.local.js
 config.local.json
 
+# Runtime config store written by the admin page / server. pairingsman.json
+# carries the bearer token — never commit these. Defaults live in server.js.
+config/*.json
+
+# Venue media dropped in by the operator (sponsor logos, player photos, videos)
+assets/sponsors/*
+assets/players/*
+assets/video/*
+
 # Your own filled-in working copies (keep the tracked overlays clean)
 *.local.html
 
@@ -13,3 +22,8 @@ desktop.ini
 *~
 .vscode/
 .idea/
+
+# keep the empty asset folders in git so fresh clones have the drop targets
+!assets/sponsors/.gitkeep
+!assets/players/.gitkeep
+!assets/video/.gitkeep

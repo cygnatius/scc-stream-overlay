@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SCC Overlay — Admin</title>
+<style>
+:root{
+  --bg:#2E2028; --bg-deep:#1F151B; --panel:#3A2A33; --panel-2:#241a20;
+  --cream:#F1E7D3; --cream-dim:#cdbfa6; --gold:#D9A13B; --ink:#2b2b3d;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{min-height:100vh;background:var(--bg);color:var(--cream);
+  font-family:'Figtree','Segoe UI',system-ui,sans-serif;padding:40px}
+.wrap{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1{font-size:26px;letter-spacing:.08em;text-transform:uppercase}
+h1 small{display:block;color:var(--gold);font-size:13px;letter-spacing:.2em;margin-top:6px}
+.card{background:var(--panel);border:1px solid rgba(241,231,211,.14);border-radius:10px;padding:20px 24px}
+.card h2{font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin-bottom:10px}
+.row{display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-bottom:1px solid rgba(241,231,211,.08);font-size:15px}
+.row:last-child{border-bottom:none}
+.row .k{color:var(--cream-dim)}
+.row .v{font-variant-numeric:tabular-nums}
+.ok{color:#8fc98f}.bad{color:var(--gold)}
+a{color:var(--gold)}
+.demo-banner{display:none;background:var(--gold);color:var(--bg-deep);border-radius:10px;
+  padding:14px 24px;font-weight:800;letter-spacing:.06em;font-size:16px}
+.demo-banner.on{display:block}
+p.note{color:var(--cream-dim);font-size:14px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SCC Broadcast Overlay <small>Admin — control panel</small></h1>
+
+  <!-- Persistent operator indicator: demo_mode shows fake players on the display -->
+  <div class="demo-banner" id="demoBanner">DEMO MODE IS ON — the display is showing the built-in demo game, not the live board</div>
+
+  <div class="card">
+    <h2>Server</h2>
+    <div class="row"><span class="k">Config API</span><span class="v" id="stApi">checking…</span></div>
+    <div class="row"><span class="k">Config hash</span><span class="v" id="stHash">—</span></div>
+    <div class="row"><span class="k">Display page</span><span class="v"><a href="/display.html" target="_blank">/display.html</a> (OBS browser source)</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Coming in the next stages</h2>
+    <p class="note">
+      This is the stage-one placeholder. The full control panel — scene switching and
+      sequences, event settings, sponsor and zone management, players, intermission video
+      and Pairingsman — is delivered in the admin stage. Config lives in <code>config/*.json</code>
+      and can be hand-edited meanwhile; the display picks changes up within the poll interval.
+    </p>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function () {
+  async function tick() {
+    try {
+      const r = await fetch("/api/config", { cache: "no-store" });
+      const j = await r.json();
+      document.getElementById("stApi").textContent = "OK";
+      document.getElementById("stApi").className = "v ok";
+      document.getElementById("stHash").textContent = j.hash;
+      document.getElementById("demoBanner").className =
+        "demo-banner" + (j.config.board.demo_mode ? " on" : "");
+    } catch (e) {
+      document.getElementById("stApi").textContent = "unreachable";
+      document.getElementById("stApi").className = "v bad";
+    }
+    setTimeout(tick, 2000);
+  }
+  tick();
+})();
+</script>
+</body>
+</html>
