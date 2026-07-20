@@ -132,6 +132,7 @@ button.rowdel:hover{border-color:var(--err);color:var(--err)}
 .ttable td:first-child{font-weight:700;text-transform:capitalize;white-space:nowrap}
 .ttable input,.ttable select{padding:6px 9px}
 .ttable .na{color:rgba(205,191,166,.4);font-size:13px}
+.pmcell{font-size:13px;color:var(--cream-dim);max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* video picker */
 .vlist{display:flex;flex-direction:column;gap:8px}
@@ -726,6 +727,82 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     </div>
   </section>
 
+  <!-- =========================== PAIRINGSMAN =========================== -->
+  <section v-if="cfg" v-show="tab === 'pairingsman'">
+    <div class="card">
+      <h2>Connection</h2>
+      <p class="sub">Read-only. The display calls Pairingsman directly on its own slow loop (default 30 s — nothing to do with the local config poll) and keeps the last good data through any failure. With this unconfigured or unreachable, every field runs on its manual value — the overlay never depends on it.</p>
+      <div class="frm">
+        <div class="f wide"><label>Base URL</label><input type="text" v-model="drafts.pm.base_url" placeholder="https://pairingsman.example.org"></div>
+        <div class="f wide">
+          <label>Bearer token <span style="text-transform:none">— {{ drafts.pm.token_saved ? 'saved ✓ (never shown; leave blank to keep it)' : 'not set' }}</span></label>
+          <input type="text" v-model="drafts.pm.token_new" :placeholder="drafts.pm.token_saved ? 'paste a new token to replace the saved one' : 'paste the token (printed once by php artisan api:token)'" autocomplete="off">
+        </div>
+        <div class="f wide" v-if="drafts.pm.token_saved">
+          <label class="chk" style="text-transform:none;letter-spacing:0">
+            <input type="checkbox" v-model="drafts.pm.token_clear"> Remove the saved token on save
+          </label>
+        </div>
+        <div class="f"><label>Entity</label>
+          <select v-model="drafts.pm.entity_type">
+            <option value="tournament">Tournament</option>
+            <option value="meeting">Meeting</option>
+            <option value="pairing">Pairing</option>
+          </select>
+        </div>
+        <div class="f"><label>Entity id</label><input type="text" v-model="drafts.pm.entity_id" placeholder="210"></div>
+        <div class="f"><label>Live refresh</label><div class="unit"><input type="number" min="5" step="5" v-model="drafts.pm.refresh_s"><span>s (60 req/min token limit)</span></div></div>
+      </div>
+      <p class="hint" style="margin-top:10px">
+        Display status: <b>{{ pmStatusLabel }}</b><br>
+        The token needs a plain READ grant on the association (facet left blank) — a narrowed grant makes the overlay look broken on air. Token is a credential: it is masked here, never logged, and <code>config/*.json</code> is gitignored.
+      </p>
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.pm">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.pm">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.pm" @click="revert('pm')">Revert</button>
+        <button class="primary" :disabled="!dirty.pm || saving" @click="savePairingsman">Save Pairingsman settings</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Fields — pulled vs manual</h2>
+      <p class="sub">What auto mode would put on air (pulled just now, with the saved settings) next to the manual value from its own tab. Auto falls through to the manual value whenever the pulled value is null; hidden shows nothing. Save mode changes above.</p>
+      <div class="btns" style="margin-bottom:12px">
+        <button class="ghost" @click="fetchPmPreview">Fetch preview</button>
+        <span class="hint" style="align-self:center" v-if="pmPreview">
+          {{ {loading:'fetching…', ok:'payload received', unconfigured:'not configured yet', notfound:'not found or not visible to this token', denied:'token rejected', unreachable:'unreachable (offline, wrong URL, or CORS not allowed yet)', error:'server error'}[pmPreview.status] }}
+        </span>
+      </div>
+      <table class="ttable">
+        <tr><th>Field</th><th>Mode</th><th>Pulled (auto would show)</th><th>Manual value</th></tr>
+        <tr v-for="f in PM_FIELDS" :key="f">
+          <td>{{ PM_LABELS[f] }}</td>
+          <td>
+            <select v-model="drafts.pm.fields[f]">
+              <option value="auto">auto</option>
+              <option value="manual">manual</option>
+              <option value="hidden">hidden</option>
+            </select>
+          </td>
+          <td class="pmcell">{{ pmPulled ? pmPulled[f] : '—' }}</td>
+          <td class="pmcell">{{ pmManual[f] }}</td>
+        </tr>
+        <tr>
+          <td>Next broadcast</td>
+          <td class="na">Event tab → Next broadcast mode</td>
+          <td class="pmcell">{{ pmPulled ? pmPulled.next_meeting : '—' }}</td>
+          <td class="pmcell">{{ pmManual.next_meeting }}</td>
+        </tr>
+      </table>
+      <p class="hint" style="margin-top:10px">
+        Zone data blocks (leaderboards, concurrent pairings, results) switch per slot in <b>Sponsors &amp; Zones</b> — auto there uses this payload.
+        <span v-if="pmPulled"> Preview: {{ pmPulled.zonesNote }}.</span>
+      </p>
+    </div>
+  </section>
+
   <p class="footnote">
     Display page for OBS: <a href="/display.html" target="_blank">/display.html</a> (1920×1080 browser source).
     Config lives in <code>config/*.json</code>; hand edits are picked up live and appear here unless a tab has unsaved changes.
@@ -739,6 +816,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
 </div>
 
 <script src="/vendor/vue.global.js"></script>
+<!-- shared Pairingsman adaptor (inert without init — admin only uses adapt/format helpers) -->
+<script src="/js/pairingsman.js"></script>
 <script>
 "use strict";
 (function () {
@@ -763,8 +842,15 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     { id: "intermission", label: "Intermission" },
     { id: "zones", label: "Sponsors & Zones" },
     { id: "players", label: "Players" },
-    { id: "pairingsman", label: "Pairingsman", soon: "stage 6" },
+    { id: "pairingsman", label: "Pairingsman" },
   ];
+  // Fields with an auto/manual/hidden switch. next_meeting is previewed on
+  // the tab too, but its switch lives in Event → Next broadcast mode.
+  const PM_FIELDS = ["event_title", "venue", "schedule", "table", "players", "result", "feature_matches"];
+  const PM_LABELS = {
+    event_title: "Event title", venue: "Venue", schedule: "Running time",
+    table: "Table", players: "Players", result: "Result", feature_matches: "Feature matches",
+  };
 
   /* ------------------------------------------------------------ helpers */
 
@@ -951,9 +1037,28 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     };
   }
 
+  function draftPairingsman(c) {
+    const p = c.pairingsman || {};
+    const fields = {};
+    for (const f of PM_FIELDS) {
+      fields[f] = ["auto", "manual", "hidden"].includes((p.fields || {})[f]) ? p.fields[f] : "auto";
+    }
+    return {
+      base_url: p.base_url || "",
+      token_new: "",                     // typed replacement; empty = keep the saved token
+      token_clear: false,
+      token_saved: !!(p.token && String(p.token).length),   // the token itself never enters the UI
+      entity_type: ["tournament", "meeting", "pairing"].includes(p.entity_type) ? p.entity_type : "meeting",
+      entity_id: p.entity_id == null ? "" : String(p.entity_id),
+      refresh_s: (Number(p.refresh_ms) || 30000) / 1000,
+      fields,
+    };
+  }
+
   const DRAFTERS = {
     event: draftEvent, board: draftBoard, trans: draftTrans, inter: draftInter, match: draftMatch,
     sponsors: draftSponsors, zones: draftZones, funder: draftFunder, roster: draftRoster,
+    pm: draftPairingsman,
   };
 
   /* ------------------------------------------------------------ state */
@@ -968,11 +1073,12 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     saving: false,
     videos: [],
     assets: { sponsors: [], players: [] },
+    pmPreview: null,                     // { status, data?, at? } — Pairingsman tab preview
   });
   const drafts = reactive({ event: null, board: null, trans: null, inter: null, match: null,
-    sponsors: null, zones: null, funder: null, roster: null, result: "" });
+    sponsors: null, zones: null, funder: null, roster: null, pm: null, result: "" });
   const baselines = reactive({ event: "", board: "", trans: "", inter: "", match: "",
-    sponsors: "", zones: "", funder: "", roster: "" });
+    sponsors: "", zones: "", funder: "", roster: "", pm: "" });
   const errs = reactive({ event: "", board: "", trans: "", inter: "" });
   const toasts = reactive([]);
   let toastId = 0;
@@ -1385,6 +1491,57 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     });
   }
 
+  async function savePairingsman() {
+    await saveGuard(async () => {
+      try {
+        const d = drafts.pm;
+        const c = await freshConfig();
+        const p = c.pairingsman;
+        p.base_url = String(d.base_url).trim().replace(/\/+$/, "");
+        // Token discipline: the saved token never round-trips through the UI.
+        // Empty replacement field = keep it; typing replaces; clear removes.
+        if (d.token_clear) p.token = "";
+        else if (String(d.token_new).trim()) p.token = String(d.token_new).trim();
+        p.entity_type = ["tournament", "meeting", "pairing"].includes(d.entity_type) ? d.entity_type : "meeting";
+        const id = String(d.entity_id).trim();
+        p.entity_id = id === "" ? null : (/^\d+$/.test(id) ? Number(id) : id);
+        p.refresh_ms = Math.round(toNum(d.refresh_s, 30, 5) * 1000);
+        p.fields = Object.assign({}, p.fields);
+        for (const f of PM_FIELDS) p.fields[f] = d.fields[f];
+        await postConfig("pairingsman", p);
+        state.cfg = c; rebuildDraft("pm", true);
+        toast("Pairingsman settings saved");
+      } catch (e) { toast("Pairingsman save failed — " + e.message, "err"); }
+    });
+  }
+
+  // Side-by-side preview: fetch the composed payload with the SAVED config
+  // so the operator sees exactly what auto mode would put on air. Direct
+  // call, same as the display — the local server never proxies Pairingsman.
+  async function fetchPmPreview() {
+    state.pmPreview = { status: "loading" };
+    try {
+      const c = await freshConfig();
+      const p = c.pairingsman;
+      const type = { tournament: "tournaments", meeting: "meetings", pairing: "pairings" }[p.entity_type];
+      const base = String(p.base_url || "").trim().replace(/\/+$/, "");
+      if (!base || !p.token || p.entity_id == null || p.entity_id === "") {
+        state.pmPreview = { status: "unconfigured" }; return;
+      }
+      const r = await fetch(`${base}/api/v1/broadcast/${type}/${encodeURIComponent(p.entity_id)}`, {
+        headers: { Authorization: "Bearer " + p.token, Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (r.status === 404) { state.pmPreview = { status: "notfound" }; return; }
+      if (r.status === 401 || r.status === 403) { state.pmPreview = { status: "denied" }; return; }
+      if (!r.ok) { state.pmPreview = { status: "error" }; return; }
+      const j = await r.json();
+      state.pmPreview = { status: "ok", data: (j && j.data) || null, at: Date.now() };
+    } catch (e) {
+      state.pmPreview = { status: "unreachable" };
+    }
+  }
+
   // Copy a roster player into the manual match fields (Live tab). This is an
   // explicit overwrite of that side, photo included when photo use is on;
   // the title clears because the roster record carries none.
@@ -1443,6 +1600,71 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         return { name: "game end", text };
       });
 
+      /* ---- Pairingsman tab ---- */
+      const pmStatusLabel = computed(() => {
+        const p = state.st && state.st.pairingsman;
+        if (!beatOk.value) return "no display connected";
+        if (!p) return "—";
+        const age = p.fetched_at ? Math.round((state.now - p.fetched_at) / 1000) : null;
+        return ({
+          off: "not configured (or no entity selected) — everything runs on manual values",
+          loading: "connecting…",
+          live: "live — " + p.entity + (age != null ? ", refreshed " + age + "s ago" : ""),
+          stale: "refresh failing — last good data held on screen" + (age != null ? " (from " + age + "s ago)" : ""),
+          notfound: "not found or not visible to this token — check the entity id and the token's grant",
+          denied: "token rejected (revoked or wrong token) — display holds last good data",
+        })[p.status] || p.status;
+      });
+      const pmPreview = computed(() => state.pmPreview);
+      const pmPulled = computed(() => {
+        const pv = state.pmPreview;
+        if (!pv || pv.status !== "ok") return null;
+        const a = SCC.pairingsman.adapt(pv.data);
+        if (!a) return null;
+        const P = SCC.pairingsman;
+        const one = (s) => s && s.name
+          ? s.name + (s.title ? " (" + s.title + ")" : "") + (s.rating != null ? " · " + s.rating : "") + (s.record ? " · " + s.record : "")
+          : "—";
+        const st = a.standings || {};
+        const n = (x) => x ? x.length : 0;
+        return {
+          event_title: a.event_title || "—",
+          venue: a.venue || "—",
+          schedule: a.schedule ? ([P.isoHM(a.schedule.open), P.isoHM(a.schedule.close)].filter(Boolean).join(" – ") || "—") : "—",
+          table: a.table ? (a.table.name || (a.table.number != null ? "Board " + a.table.number : "—")) : "—",
+          players: a.players ? "W " + one(a.players.white) + "   ·   B " + one(a.players.black) : "—",
+          result: (a.result && a.result.label) || "—",
+          feature_matches: a.feature_matches
+            ? a.feature_matches.map(f => [f.white + " v " + f.black, f.scheduled_start ? P.isoHM(f.scheduled_start) : null].filter(Boolean).join(" · ")).join(";  ")
+            : "—",
+          next_meeting: a.next_meeting && a.next_meeting.open
+            ? [P.isoDateLabel(a.next_meeting.open), P.isoHM(a.next_meeting.open), a.next_meeting.venue].filter(Boolean).join(" · ")
+            : "null — the computed weekly default applies",
+          zonesNote: "tournament lb " + n(st.tournament_leaderboard) + " · meeting lb " + n(st.meeting_leaderboard)
+            + " · pairings " + n(st.concurrent_pairings) + " · results " + n(st.results) + " rows",
+        };
+      });
+      const pmManual = computed(() => {
+        const c = state.cfg;
+        if (!c) return {};
+        const man = (c.players && c.players.manual) || {};
+        const one = (s) => (man[s] && man[s].name) ? man[s].name + (man[s].rating ? " · " + man[s].rating : "") : "—";
+        const nb = c.general.next_broadcast || {};
+        const nbManual = nb.mode === "manual"
+          ? [nb.manual_date, nb.manual_time].filter(Boolean).join(" · ") || "—"
+          : nb.mode === "hidden" ? "(hidden)" : "computed weekly default";
+        return {
+          event_title: c.general.event_title || "—",
+          venue: c.general.location || "—",
+          schedule: [c.general.running_time_start, c.general.running_time_end].filter(Boolean).join(" – ") || "—",
+          table: c.general.table_name || ("Board " + (c.general.table_number || 1)),
+          players: "W " + one("white") + "   ·   B " + one("black"),
+          result: ((c.scenes.scenes || {}).postgame || {}).result_text || "—",
+          feature_matches: c.general.feature_match_time || "—",
+          next_meeting: nbManual,
+        };
+      });
+
       const pgnStatusLabel = computed(() => {
         if (!beatOk.value) return "no display connected";
         const p = state.st && state.st.pgn;
@@ -1488,6 +1710,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         if (id === "intermission") return dirty.value.inter;
         if (id === "zones") return dirty.value.sponsors || dirty.value.zones || dirty.value.funder;
         if (id === "players") return dirty.value.roster;
+        if (id === "pairingsman") return dirty.value.pm;
         return false;
       };
 
@@ -1535,6 +1758,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         if (id === "intermission") loadVideos(false);
         if (id === "zones") loadAssets("sponsors", false);
         if (id === "players") loadAssets("players", false);
+        if (id === "pairingsman" && !state.pmPreview) fetchPmPreview();
       }
 
       loadVideos(false);
@@ -1556,6 +1780,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         zoneScene, stripOn, colDimmed, colSlotIds, slotLabel, activeSlotCount,
         setStrip, saveSponsors, saveZones, saveFunder, saveRoster, assignSide,
         pickUpload, onUpload, loadAssets,
+        PM_FIELDS, PM_LABELS, pmStatusLabel, pmPreview, pmPulled, pmManual,
+        savePairingsman, fetchPmPreview,
       };
     },
   }).mount("#app");

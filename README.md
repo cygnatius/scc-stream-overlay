@@ -44,8 +44,10 @@ operating the admin page: **SCC-Overlay-Manual-Setup.md**.
   runs on the same machine, so the default `127.0.0.1:1982` just works; a
   manual host override in admin covers the two-machine fallback.
 - **Players / event** — typed in admin (roster with photos supported), or
-  auto-filled from the Pairingsman broadcast API once that integration stage
-  lands. The overlay is fully operable with Pairingsman absent.
+  auto-filled from the Pairingsman broadcast API (read-only; configured on
+  the admin Pairingsman tab, every field switchable auto / manual / hidden).
+  The overlay is fully operable with Pairingsman absent — auto degrades to
+  the manual values whenever the payload is null or unreachable.
 
 ## The legacy single file
 

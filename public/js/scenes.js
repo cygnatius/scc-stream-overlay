@@ -351,6 +351,9 @@ SCC.scenes = (function () {
           config_hash: cfg.hash,
           config_ok: cfg.ok,
           pgn: window.SCC.pgn ? { status: SCC.pgn.state.status, source: SCC.pgn.state.source } : null,
+          pairingsman: window.SCC.pairingsman
+            ? { status: SCC.pairingsman.state.status, entity: SCC.pairingsman.state.entity, fetched_at: SCC.pairingsman.state.fetchedAt }
+            : null,
         }),
       });
     } catch (e) { /* server down — heartbeat resumes when it returns */ }

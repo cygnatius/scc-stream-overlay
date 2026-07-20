@@ -67,11 +67,18 @@ SCC.zones = (function () {
 
     if (s.source === "data") {
       if (s.data_mode === "hidden") return null;
-      // data_mode "auto" = Pairingsman payload; until that stage exists it
-      // falls through to the manual lines, and with none of those either the
-      // slot renders nothing — a data zone must never show a placeholder on air.
-      const lines = (Array.isArray(s.data_lines) ? s.data_lines : [])
-        .map(l => String(l).trim()).filter(Boolean).slice(0, 8);
+      // auto = the Pairingsman payload; it falls through to the manual lines
+      // when absent, and with none of those either the slot renders nothing —
+      // a data zone must never show a placeholder on air.
+      let lines = null;
+      if (s.data_mode === "auto" && window.SCC.pairingsman) {
+        lines = SCC.pairingsman.dataLines(s.data_kind);
+      }
+      if (!lines) {
+        lines = (Array.isArray(s.data_lines) ? s.data_lines : [])
+          .map(l => String(l).trim()).filter(Boolean);
+      }
+      lines = lines.slice(0, 8);
       if (!lines.length) return null;
       return { kind: "data", id, cap: s.data_title || KIND_LABEL[s.data_kind] || "Results", lines };
     }
