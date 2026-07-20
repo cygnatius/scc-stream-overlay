@@ -98,6 +98,12 @@ const CONFIG_DEFAULTS = {
     poll_ms: 800,                        // eboards poll over the LiveChess websocket
     demo_mode: false,                    // true = show the built-in demo game (design aid).
                                          // Fake names must never reach air by accident.
+    move_times: true,                    // per-move times beside each move in the list
+    pgn: {
+      enabled: true,                     // probe LiveChess for the game PGN (times + verification)
+      url: "",                           // explicit PGN URL; empty = probe candidates on the host
+      poll_ms: 6000,                     // display → /api/pgn cadence (slow; separate from config poll)
+    },
   },
 
   scenes: {
@@ -398,10 +404,99 @@ function readBody(req, res, cb) {
 let DISPLAY_STATUS = null;
 let DISPLAY_STATUS_AT = 0;
 
+/* ---------------------------------------------------------- PGN source
+   The display cannot fetch LiveChess's HTTP endpoints itself (no CORS
+   headers there), so this loopback server probes for the game PGN on its
+   behalf. Candidates derive from the configured LiveChess host; an explicit
+   board.pgn.url overrides. The last working URL is sticky, the last good
+   text is cached, and a failed probe returns the cache flagged stale — the
+   display never sees a blank where it had data. LiveChess absent or serving
+   no PGN is a NORMAL state: {status:"absent"}, quietly.                    */
+let PGN_CACHE = null;                    // { text, url, at }
+let PGN_STICKY_URL = null;
+let PGN_LAST_ATTEMPT = 0;
+
+function lcEffectiveHost(b) {
+  let h = (b.manual_host_override && b.manual_host) ? String(b.manual_host).trim() : String(b.host || "").trim();
+  if (!h) return null;
+  if (!h.includes(":")) h = h + ":" + (Number(b.port) || 1982);
+  return h;
+}
+
+function pgnCandidates(board) {
+  const explicit = board.pgn && String(board.pgn.url || "").trim();
+  if (explicit) {
+    if (/^https?:\/\//i.test(explicit)) return [explicit];
+    const host = lcEffectiveHost(board);
+    return host ? ["http://" + host + (explicit.startsWith("/") ? "" : "/") + explicit] : [];
+  }
+  const host = lcEffectiveHost(board);
+  if (!host) return [];
+  return ["http://" + host + "/pgn", "http://" + host + "/pgn/games.pgn", "http://" + host + "/api/v1.0/pgn"];
+}
+
+function looksLikePgn(text) {
+  return /\[(Event|White|Site|Result)\s+"/.test(text) || /\b\d+\.\s*(?:[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8]|O-O)/.test(text);
+}
+
+async function fetchPgnOnce(url) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 1500);
+  try {
+    const r = await fetch(url, { signal: ctl.signal });
+    if (!r.ok) return null;
+    const text = await r.text();
+    if (!text || text.length > 2 * 1024 * 1024 || !looksLikePgn(text)) return null;
+    return text;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function handlePgn(res) {
+  const board = readConfigFile("board");
+  if (!board.pgn || board.pgn.enabled === false) return sendJSON(res, 200, { ok: false, status: "disabled" });
+
+  // The client cadence governs; still, never probe more than ~once a second.
+  const now = Date.now();
+  if (now - PGN_LAST_ATTEMPT >= 1000) {
+    PGN_LAST_ATTEMPT = now;
+    const list = pgnCandidates(board);
+    const ordered = PGN_STICKY_URL && list.includes(PGN_STICKY_URL)
+      ? [PGN_STICKY_URL, ...list.filter(u => u !== PGN_STICKY_URL)]
+      : list;
+    for (const url of ordered) {
+      const text = await fetchPgnOnce(url);
+      if (text !== null) {
+        PGN_STICKY_URL = url;
+        PGN_CACHE = { text, url, at: now };
+        break;
+      }
+    }
+  }
+
+  if (!PGN_CACHE) return sendJSON(res, 200, { ok: false, status: "absent" });
+  return sendJSON(res, 200, {
+    ok: true,
+    pgn: PGN_CACHE.text,
+    source: PGN_CACHE.url,
+    fetched_at: PGN_CACHE.at,
+    stale: Date.now() - PGN_CACHE.at > Math.max(4000, (Number(board.pgn.poll_ms) || 6000) * 2),
+  });
+}
+
 function handleApi(req, res, pathname) {
   // GET /api/config/hash — the display's cheap poll target.
   if (req.method === "GET" && pathname === "/api/config/hash") {
     return sendJSON(res, 200, { ok: true, hash: configHash() });
+  }
+
+  // GET /api/pgn — probe/relay the LiveChess game PGN (see PGN source above).
+  if (req.method === "GET" && pathname === "/api/pgn") {
+    handlePgn(res).catch(() => { try { sendError(res, 500, "pgn probe failed"); } catch { } });
+    return;
   }
 
   // Display heartbeat: POST from the display page, GET from admin.

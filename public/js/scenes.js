@@ -350,6 +350,7 @@ SCC.scenes = (function () {
           moves: game.moves.length,
           config_hash: cfg.hash,
           config_ok: cfg.ok,
+          pgn: window.SCC.pgn ? { status: SCC.pgn.state.status, source: SCC.pgn.state.source } : null,
         }),
       });
     } catch (e) { /* server down — heartbeat resumes when it returns */ }

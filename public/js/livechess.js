@@ -98,8 +98,8 @@ SCC.livechess = (function () {
       if (b.clock) {
         // the feed only changes these at move-end; sync ONLY on a real change so the
         // local per-second countdown isn't reset back every poll.
-        if (b.clock.white !== LC_LAST_W) { LC_LAST_W = b.clock.white; const s = SCC.clock.lcClockSec(b.clock.white); if (s != null) game.white.sec = s; }
-        if (b.clock.black !== LC_LAST_B) { LC_LAST_B = b.clock.black; const s = SCC.clock.lcClockSec(b.clock.black); if (s != null) game.black.sec = s; }
+        if (b.clock.white !== LC_LAST_W) { LC_LAST_W = b.clock.white; const s = SCC.clock.lcClockSec(b.clock.white); if (s != null) { game.white.sec = s; SCC.moves.syncClock("w", s); } }
+        if (b.clock.black !== LC_LAST_B) { LC_LAST_B = b.clock.black; const s = SCC.clock.lcClockSec(b.clock.black); if (s != null) { game.black.sec = s; SCC.moves.syncClock("b", s); } }
         // Only tick a clock while the DGT feed says one is running — this is what stops the
         // pre-game countdown. `clock.run` is a BOOLEAN: true while a clock is running, null/
         // false when both are stopped (before the game starts and while it's paused). It does

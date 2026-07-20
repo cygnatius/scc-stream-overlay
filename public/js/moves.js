@@ -31,7 +31,42 @@ SCC.moves = (function () {
   let LC_SNAP = null;
   let LC_LASTSEEN = null;       // last placement processed (dedupes polls)
 
-  function init(g) { game = g; }
+  /* OBSERVED per-move times (stage 5). obsTimes[ply] = seconds the mover
+     spent, or null. Committed with a PROVISIONAL value from the locally
+     ticking clock, then REFINED at the next feed clock sync — the DGT feed
+     only changes a clock value at move-end, so the synced value is exact.
+     Strictly parallel to game.moves; wiped only where the move list is. */
+  let obsTimes = [];
+  let lastClk = { w: null, b: null };   // clock baseline per side, from feed syncs only
+  let lastPly = { w: null, b: null };   // last committed ply per side (for refinement)
+
+  function init(g) { game = g; if (g.timesVersion === undefined) g.timesVersion = 0; }
+
+  function clearTimes() {
+    obsTimes = []; lastClk = { w: null, b: null }; lastPly = { w: null, b: null };
+    if (game) game.timesVersion++;
+  }
+
+  function clockOf(c) {
+    const s = c === "w" ? game.white.sec : game.black.sec;
+    return s == null ? null : s;
+  }
+
+  // Feed clock sync for one side (livechess.js calls this on real changes).
+  // Refines the provisional time of that side's last move, then becomes the
+  // baseline for their next one. A sync with no move yet is the baseline too
+  // (the pre-game clock message).
+  function syncClock(c, sec) {
+    if (sec == null) return;
+    if (lastPly[c] != null && lastClk[c] != null) {
+      obsTimes[lastPly[c]] = Math.max(0, lastClk[c] - sec);
+      game.timesVersion++;
+    }
+    lastClk[c] = sec;
+    lastPly[c] = null;                    // refined once; later syncs are between-move noise
+  }
+
+  function obsTime(ply) { return obsTimes[ply] != null ? obsTimes[ply] : null; }
 
   function placementOf(fen) { return String(fen).split(" ")[0]; }
   function pushState() { game.fen = GAME.fen(); game.toMove = GAME.turn(); }
@@ -44,18 +79,24 @@ SCC.moves = (function () {
     game.toMove = GAME.turn();
     GAME_STARTED = true;
     game.started = true;
+    // provisional time spent: baseline minus the mover's locally-ticked clock
+    // (the exact feed value refines it moments later via syncClock)
+    const c = m.color, cur = clockOf(c);
+    obsTimes.push(lastClk[c] != null && cur != null ? Math.max(0, lastClk[c] - cur) : null);
+    lastPly[c] = game.moves.length - 1;
+    game.timesVersion++;
   }
 
   function newGameFromStart() {                               // board reset to the initial position
     GAME = new Chess(); game.moves = []; game.currentPly = -1; game.lastMove = null;
     GAME_STARTED = false; game.started = false;
-    clearTimeout(LC_SNAP); LC_SNAP = null; pushState();
+    clearTimeout(LC_SNAP); LC_SNAP = null; clearTimes(); pushState();
   }
 
   function adoptPosition(placement) {                         // first sync / last-resort desync recovery
     // We have no trustworthy move history for this position, so start a clean list from here.
     try { GAME = new Chess(placement + " " + (game.toMove || "w") + " - - 0 1"); } catch (e) { return false; }
-    game.moves = []; game.currentPly = -1; game.lastMove = null; pushState(); return true;
+    game.moves = []; game.currentPly = -1; game.lastMove = null; clearTimes(); pushState(); return true;
   }
 
   // Squares that differ between two placements (as algebraic names, e.g. "e4").
@@ -97,7 +138,11 @@ SCC.moves = (function () {
     for (let i = 0; i < maxBack; i++) {
       const b = GAME.undo(); if (!b) break; undone.push(b);
       if (placementOf(GAME.fen()) === target) {
-        for (let k = 0; k < undone.length; k++) game.moves.pop();
+        for (let k = 0; k < undone.length; k++) { game.moves.pop(); obsTimes.pop(); }
+        // clock baselines are meaningless across a takeback (the operator may
+        // wind the clocks); re-baseline from the next feed syncs
+        lastClk = { w: null, b: null }; lastPly = { w: null, b: null };
+        game.timesVersion++;
         const h = GAME.history({ verbose: true }), l = h[h.length - 1];
         game.currentPly = game.moves.length - 1; game.lastMove = l ? { from: l.from, to: l.to } : null;
         pushState(); return true;
@@ -152,13 +197,23 @@ SCC.moves = (function () {
   // serial, or leaving demo mode). Never called from the placement path above.
   function reset() {
     GAME = null; GAME_STARTED = false; LC_LASTSEEN = null;
-    clearTimeout(LC_SNAP); LC_SNAP = null;
+    clearTimeout(LC_SNAP); LC_SNAP = null; clearTimes();
     game.moves = []; game.currentPly = -1; game.lastMove = null;
     game.fen = SCC.board.EMPTY_PLACEMENT; game.toMove = "w"; game.started = false;
   }
 
   /* ---- moves list rendering (same DOM as the original renderMoves) ------ */
-  function renderList(el, g) {
+  // "0:07" / "1:23" / "1:02:03" — per-move time spent
+  function fmtSpent(sec) {
+    sec = Math.max(0, Math.round(sec));
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    return h ? h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0")
+      : m + ":" + String(s).padStart(2, "0");
+  }
+
+  // times: optional array of seconds|null per ply. A ply without a time (or
+  // no array at all) renders exactly the classic cell — plain SAN text.
+  function renderList(el, g, times) {
     el.innerHTML = "";
     const pairs = Math.ceil(g.moves.length / 2);
     for (let i = 0; i < pairs; i++) {
@@ -168,8 +223,15 @@ SCC.moves = (function () {
         const ply = i * 2 + s;
         const cell = document.createElement("div");
         if (ply < g.moves.length) {
-          cell.className = "mv" + (ply === g.currentPly ? " cur" : "");
-          cell.textContent = g.moves[ply];
+          const t = times ? times[ply] : null;
+          cell.className = "mv" + (t != null ? " has-t" : "") + (ply === g.currentPly ? " cur" : "");
+          if (t != null) {
+            const san = document.createElement("span"); san.textContent = g.moves[ply];
+            const tm = document.createElement("span"); tm.className = "mvt"; tm.textContent = fmtSpent(t);
+            cell.appendChild(san); cell.appendChild(tm);
+          } else {
+            cell.textContent = g.moves[ply];
+          }
         } else { cell.className = "mv"; cell.textContent = ""; }
         el.appendChild(cell);
       }
@@ -192,5 +254,5 @@ SCC.moves = (function () {
     };
   }
 
-  return { init, applyPlacement, reset, renderList, gameStatus, START_PLACEMENT, placementOf };
+  return { init, applyPlacement, reset, renderList, gameStatus, syncClock, obsTime, START_PLACEMENT, placementOf };
 })();

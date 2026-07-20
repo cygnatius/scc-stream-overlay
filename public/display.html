@@ -366,6 +366,16 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 /* player photo modes: when a side shows no visual at all (photos_only with
    no photo, or no_photos) the card collapses the avatar column */
 .pcard.nophoto{grid-template-columns:1fr auto}
+
+/* per-move times (stage 5) — only cells WITH a time get the flex layout, so
+   the preserved .mv rule renders classic cells byte-identically */
+.mv.has-t{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.mv .mvt{font-size:13px;font-weight:600;color:var(--cream-dim);font-variant-numeric:tabular-nums;flex:none}
+.mv.cur .mvt{color:rgba(31,21,27,.7)}
+/* PGN divergence: deliberately quiet — a dim gold dot by the panel title.
+   No red, no icons, nothing over the board. */
+.pgndot{display:inline-block;width:7px;height:7px;border-radius:50%;
+  background:var(--gold);opacity:.35;margin-left:9px;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -427,7 +437,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       <!-- right column: moves + sponsors -->
       <div class="side">
         <div class="moves">
-          <div class="cap"><span class="t">Moves</span><span class="st" v-text="moveStatus"></span></div>
+          <div class="cap"><span class="t">Moves<span class="pgndot" v-if="pgnDiverged"></span></span><span class="st" v-text="moveStatus"></span></div>
           <div class="mlist" id="mlist"></div>
         </div>
 
@@ -594,6 +604,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 <script src="/js/board.js"></script>
 <script src="/js/moves.js"></script>
 <script src="/js/livechess.js"></script>
+<script src="/js/pgn.js"></script>
 <script src="/js/scenes.js"></script>
 <script src="/js/zones.js"></script>
 
@@ -653,10 +664,11 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 
   const cfg = SCC.config.store;
   const sceneView = SCC.scenes.view;
-  // Init zones BEFORE mount: the zone computeds must find the store on their
-  // very first run — an early [] return with no reactive read would freeze
+  // Init zones and pgn BEFORE mount: their computeds must find live state on
+  // their very first run — an early return with no reactive read would freeze
   // them empty forever (computeds only re-run when a tracked dep changes).
   SCC.zones.init(cfg);
+  SCC.pgn.init(game, cfg);
 
   function initials(name) { return name.split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase(); }
   function fmtTimeHM(s) {
@@ -707,6 +719,8 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       const blackClock = computed(() => game.black.sec != null ? SCC.clock.fmtSec(game.black.sec) : "—:—:—");
       const moveStatus = computed(() => (game.toMove === "w" ? "White" : "Black") + " to move");
       const cfgStale = computed(() => cfg.loaded && !cfg.ok);
+      /* PGN divergence (stage 5): the one on-air signal — a quiet dot */
+      const pgnDiverged = computed(() => SCC.pgn.state.status === "diverged");
 
       /* scenes */
       const sceneStyle = (name) => SCC.scenes.layerState(name);
@@ -767,7 +781,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 
       return {
         game, general, boardLabel, roundLabel, socials, funder, white, black,
-        whiteClock, blackClock, moveStatus, cfgStale,
+        whiteClock, blackClock, moveStatus, cfgStale, pgnDiverged,
         sceneStyle, curtainStyle, startTimesLine, featureLine, postResult,
         nextBroadcast, ivHasVideo,
         bandZones, gameSideZones, gameStripZones,
@@ -792,7 +806,22 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
   const boardEl = document.getElementById("board");
   const mlistEl = document.getElementById("mlist");
   watch(() => [game.fen, game.lastMove], () => SCC.board.render(boardEl, game), { immediate: true });
-  watch(() => [game.moves.length, game.currentPly], () => SCC.moves.renderList(mlistEl, game), { immediate: true });
+  // moveTimes covers moves.length / currentPly / timesVersion / pgn rev /
+  // the move_times toggle — one recompute re-renders the list with times.
+  {
+    const mtimes = computed(() => {
+      void SCC.pgn.state.rev; void game.timesVersion; void game.currentPly;
+      if (cfg.data.board.move_times === false) return null;
+      const out = [];
+      for (let i = 0; i < game.moves.length; i++) {
+        const p = SCC.pgn.timeFor(i);
+        out.push(p != null ? p : SCC.moves.obsTime(i));
+      }
+      return out;
+    });
+    watch(() => [game.moves.length, game.currentPly, mtimes.value],
+      () => SCC.moves.renderList(mlistEl, game, mtimes.value), { immediate: true });
+  }
 
   /* ---------------- intermission video: chapters + resume ---------------- */
   /* Chapter model: chapters are start offsets (seconds). On returning to

@@ -394,6 +394,28 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         Effective connection now: <b>{{ effectiveHostLabel }}</b> — {{ st && st.lc_connected ? 'connected' : 'not connected' }}.<br>
         Saving a changed host reconnects the feed. Changing the <b>serial</b> starts tracking a different physical board, which resets the move list — the display never wipes moves for any other config change.
       </p>
+
+      <h3>Per-move times &amp; game PGN</h3>
+      <div class="frm">
+        <div class="f wide">
+          <label class="chk" style="text-transform:none;letter-spacing:0">
+            <input type="checkbox" v-model="drafts.board.move_times">
+            Show per-move times beside each move
+            <small>&nbsp;— from PGN clock annotations where the PGN matches the observed game, otherwise from observed clock changes</small>
+          </label>
+        </div>
+        <div class="f wide">
+          <label class="chk" style="text-transform:none;letter-spacing:0">
+            <input type="checkbox" v-model="drafts.board.pgn_enabled">
+            Probe LiveChess for the game PGN
+            <small>&nbsp;— cross-checks the observed game and refines the times; harmless if LiveChess serves no PGN</small>
+          </label>
+        </div>
+        <div class="f wide"><label>PGN URL override <span style="text-transform:none">(optional)</span></label>
+          <input type="text" v-model="drafts.board.pgn_url" placeholder="auto-probe /pgn on the LiveChess host" :disabled="!drafts.board.pgn_enabled"></div>
+        <div class="f"><label>PGN poll</label><div class="unit"><input type="number" min="2" step="1" v-model="drafts.board.pgn_poll_s" :disabled="!drafts.board.pgn_enabled"><span>s (slow by design)</span></div></div>
+      </div>
+      <p class="hint" style="margin-top:10px">PGN status: <b>{{ pgnStatusLabel }}</b><span v-if="st && st.pgn && st.pgn.source"> — source {{ st.pgn.source }}</span></p>
       <div class="savebar">
         <span class="errmsg" v-if="errs.board">{{ errs.board }}</span>
         <span class="dirty" v-else-if="dirty.board">Unsaved changes</span>
@@ -813,10 +835,14 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   }
 
   function draftBoard(c) {
-    const b = c.board;
+    const b = c.board, p = b.pgn || {};
     return {
       serialnr: b.serialnr || "", port: b.port ?? 1982, poll_ms: b.poll_ms ?? 800,
       manual_host_override: !!b.manual_host_override, manual_host: b.manual_host || "",
+      move_times: b.move_times !== false,
+      pgn_enabled: p.enabled !== false,
+      pgn_url: p.url || "",
+      pgn_poll_s: (Number(p.poll_ms) || 6000) / 1000,
     };
   }
 
@@ -1151,6 +1177,12 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
           poll_ms: toNum(d.poll_ms, 800, 200),
           manual_host_override: !!d.manual_host_override,
           manual_host: String(d.manual_host).trim(),
+          move_times: !!d.move_times,
+          pgn: Object.assign({}, c.board.pgn, {
+            enabled: !!d.pgn_enabled,
+            url: String(d.pgn_url).trim(),
+            poll_ms: Math.round(toNum(d.pgn_poll_s, 6, 2) * 1000),
+          }),
           // host and demo_mode deliberately untouched: host stays 127.0.0.1
           // per the single-machine venue; demo is the Live-tab switch.
         });
@@ -1411,6 +1443,21 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         return { name: "game end", text };
       });
 
+      const pgnStatusLabel = computed(() => {
+        if (!beatOk.value) return "no display connected";
+        const p = state.st && state.st.pgn;
+        if (!p) return "—";
+        return {
+          off: "probing off",
+          absent: "no PGN source found — times come from observed clocks (normal when LiveChess serves no PGN)",
+          waiting: "source found — waiting for moves to match against",
+          agree: "matched — per-move times from the PGN clocks",
+          ambiguous: "several games match the observed moves — holding observed times until they separate",
+          diverged: "PGN disagrees with the observed game — the observed game stays on air (quiet dot on the moves panel)",
+          stale: "PGN source lost — last agreed times held",
+        }[p.status] || p.status;
+      });
+
       const effectiveHostLabel = computed(() => {
         const b = drafts.board;
         if (!b) return "—";
@@ -1495,7 +1542,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
 
       return {
         SCENES, TTYPES, DIRS, TIERS, COLS, tabs: TABS,
-        cfg, st, beatOk, pendingAuto, autoEnabled, seqCfg, seqInfo, effectiveHostLabel,
+        cfg, st, beatOk, pendingAuto, autoEnabled, seqCfg, seqInfo, effectiveHostLabel, pgnStatusLabel,
         apiOk: computed(() => state.apiOk),
         now: computed(() => state.now),
         tab: computed(() => state.tab),
