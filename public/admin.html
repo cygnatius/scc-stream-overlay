@@ -3,75 +3,1562 @@
 <head>
 <meta charset="UTF-8">
 <title>SCC Overlay — Admin</title>
+<link href="/vendor/fonts/fonts.css" rel="stylesheet">
 <style>
+/* ==========================================================================
+   SCC BROADCAST OVERLAY — ADMIN (operator control panel, normal browser)
+   Same club palette as the display. This page is never on stream, so it may
+   use stronger warning colours than the display is allowed to.
+
+   Write discipline (matches scenes.js): every write is a read-modify-write
+   of one whole config file against a fresh GET /api/config, so the keys the
+   DISPLAY owns (scenes.active/sequence finalisation, pending_auto) and the
+   keys OTHER TABS own are never clobbered by a stale draft.
+   ========================================================================== */
 :root{
   --bg:#2E2028; --bg-deep:#1F151B; --panel:#3A2A33; --panel-2:#241a20;
-  --cream:#F1E7D3; --cream-dim:#cdbfa6; --gold:#D9A13B; --ink:#2b2b3d;
+  --cream:#F1E7D3; --cream-dim:#cdbfa6; --gold:#D9A13B; --brick:#A9603F;
+  --ink:#2b2b3d; --ok:#8fc98f; --err:#e08d8d; --line:rgba(241,231,211,.14);
 }
 *{margin:0;padding:0;box-sizing:border-box}
+[v-cloak]{display:none}
+html{scrollbar-gutter:stable}
 body{min-height:100vh;background:var(--bg);color:var(--cream);
-  font-family:'Figtree','Segoe UI',system-ui,sans-serif;padding:40px}
-.wrap{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
-h1{font-size:26px;letter-spacing:.08em;text-transform:uppercase}
-h1 small{display:block;color:var(--gold);font-size:13px;letter-spacing:.2em;margin-top:6px}
-.card{background:var(--panel);border:1px solid rgba(241,231,211,.14);border-radius:10px;padding:20px 24px}
-.card h2{font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin-bottom:10px}
-.row{display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-bottom:1px solid rgba(241,231,211,.08);font-size:15px}
-.row:last-child{border-bottom:none}
-.row .k{color:var(--cream-dim)}
-.row .v{font-variant-numeric:tabular-nums}
-.ok{color:#8fc98f}.bad{color:var(--gold)}
+  font-family:'Figtree','Segoe UI',system-ui,sans-serif;font-size:15px}
+.wrap{max-width:1080px;margin:0 auto;padding:26px 28px 80px}
+
+/* ---------------- sticky operator strip ---------------- */
+.topbar{position:sticky;top:0;z-index:20;background:linear-gradient(var(--bg) 88%,rgba(46,32,40,0));
+  padding:18px 0 10px}
+h1{font-family:'Playfair Display',Georgia,serif;font-size:24px;letter-spacing:.05em}
+h1 small{color:var(--gold);font-family:'Figtree',sans-serif;font-size:12px;
+  letter-spacing:.22em;text-transform:uppercase;margin-left:12px;font-weight:700}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.pill{display:inline-flex;align-items:center;gap:7px;background:var(--panel-2);
+  border:1px solid var(--line);border-radius:999px;padding:5px 13px;font-size:13px;color:var(--cream-dim)}
+.pill b{color:var(--cream);font-weight:700}
+.pill .led{width:8px;height:8px;border-radius:50%;background:var(--cream-dim);flex:none}
+.pill.good .led{background:var(--ok)} .pill.warn .led{background:var(--gold)} .pill.down .led{background:var(--err)}
+
+.demo-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  background:var(--gold);color:var(--bg-deep);border-radius:10px;
+  padding:12px 20px;font-weight:800;letter-spacing:.04em;font-size:15px;margin-top:12px}
+.demo-banner button{background:var(--bg-deep);color:var(--cream);border:none;flex:none}
+
+.pending{display:flex;background:var(--panel-2);border:1px solid var(--gold);border-radius:10px;
+  padding:12px 18px;font-size:14px;align-items:center;justify-content:space-between;gap:16px;margin-top:12px}
+.pending b{color:var(--gold)}
+
+/* ---------------- tabs ---------------- */
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-top:16px;border-bottom:1px solid var(--line);padding-bottom:0}
+.tab{font:inherit;font-weight:700;letter-spacing:.04em;border:none;background:none;color:var(--cream-dim);
+  padding:9px 15px;cursor:pointer;border-radius:8px 8px 0 0;border-bottom:3px solid transparent;position:relative}
+.tab:hover{color:var(--cream)}
+.tab.on{color:var(--gold);border-bottom-color:var(--gold)}
+.tab:disabled{color:rgba(205,191,166,.38);cursor:not-allowed}
+.tab .soon{display:block;font-size:9px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;
+  color:rgba(205,191,166,.45)}
+.tab .dot{position:absolute;top:7px;right:4px;width:7px;height:7px;border-radius:50%;background:var(--gold)}
+
+/* ---------------- cards & forms ---------------- */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px 24px;margin-top:18px}
+.card h2{font-size:14px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold);margin-bottom:4px}
+.card .sub{color:var(--cream-dim);font-size:13px;line-height:1.5;margin-bottom:14px}
+.card h3{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--cream-dim);margin:18px 0 8px}
+
+.frm{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px 18px}
+.f{display:flex;flex-direction:column;gap:5px;min-width:0}
+.f.wide{grid-column:1/-1}
+.f label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--cream-dim);font-weight:700}
+input[type=text],input[type=number],input[type=time],select,textarea{
+  font:inherit;background:var(--panel-2);color:var(--cream);border:1px solid var(--line);
+  border-radius:7px;padding:8px 11px;width:100%;min-width:0}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold)}
+input:disabled{opacity:.45}
+input[type=checkbox]{accent-color:var(--gold);width:17px;height:17px;flex:none}
+select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--cream-dim) 50%),linear-gradient(135deg,var(--cream-dim) 50%,transparent 50%);
+  background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:32px}
+.chk{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--cream);cursor:pointer;user-select:none}
+.chk small{color:var(--cream-dim)}
+.unit{display:flex;align-items:center;gap:8px}
+.unit input{flex:1}
+.unit span{color:var(--cream-dim);font-size:13px;flex:none}
+
+button{font:inherit;font-weight:700;letter-spacing:.05em;border:1px solid rgba(241,231,211,.25);
+  background:var(--panel-2);color:var(--cream);border-radius:8px;padding:9px 17px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--gold)}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--gold);color:var(--bg-deep);border-color:var(--gold)}
+button.primary:hover:not(:disabled){filter:brightness(1.08)}
+button.ghost{background:none}
+button.cancelbtn{background:var(--bg-deep);border-color:var(--gold);color:var(--gold)}
+button.danger{border-color:var(--err);color:var(--err);background:none}
+.btns{display:flex;flex-wrap:wrap;gap:10px}
+
+/* scene buttons */
+.scenebtns{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+.scenebtn{padding:16px 6px;text-transform:capitalize;font-size:15px;position:relative}
+.scenebtn.onair{background:var(--gold);color:var(--bg-deep);border-color:var(--gold)}
+.scenebtn.target::after{content:"";position:absolute;left:12px;right:12px;bottom:6px;height:3px;
+  border-radius:2px;background:var(--brick)}
+.seqrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:6px}
+.seqprog{flex:1;min-width:240px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;
+  padding:9px 14px;font-size:14px;color:var(--cream-dim)}
+.seqprog b{color:var(--gold)}
+
+/* save bar inside a card */
+.savebar{display:flex;align-items:center;gap:12px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+.savebar .grow{flex:1}
+.hint{color:var(--cream-dim);font-size:13px;line-height:1.5}
+.hint b{color:var(--cream)}
+.dirty{color:var(--gold);font-size:13px;font-weight:700}
+.diskchg{color:var(--brick);font-size:13px;font-weight:700}
+.errmsg{color:var(--err);font-size:13px;font-weight:700}
+
+/* row editors (social links, chapters) */
+.rows{display:flex;flex-direction:column;gap:8px}
+.rowitem{display:grid;gap:10px;align-items:center}
+.rowitem.social{grid-template-columns:180px 1fr auto}
+.rowitem.chapter{grid-template-columns:150px 1fr auto}
+.rowitem .mini{color:var(--cream-dim);font-size:13px}
+button.rowdel{padding:7px 12px;border-color:var(--line);color:var(--cream-dim)}
+button.rowdel:hover{border-color:var(--err);color:var(--err)}
+
+/* transitions table */
+.ttable{width:100%;border-collapse:collapse}
+.ttable th{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--cream-dim);
+  text-align:left;padding:6px 10px;border-bottom:1px solid var(--line)}
+.ttable td{padding:7px 10px;border-bottom:1px solid rgba(241,231,211,.06);vertical-align:middle}
+.ttable td:first-child{font-weight:700;text-transform:capitalize;white-space:nowrap}
+.ttable input,.ttable select{padding:6px 9px}
+.ttable .na{color:rgba(205,191,166,.4);font-size:13px}
+
+/* video picker */
+.vlist{display:flex;flex-direction:column;gap:8px}
+.vitem{display:flex;align-items:center;gap:12px;background:var(--panel-2);border:1px solid var(--line);
+  border-radius:8px;padding:10px 14px;cursor:pointer}
+.vitem:hover{border-color:var(--gold)}
+.vitem.sel{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+.vitem .nm{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vitem .meta{color:var(--cream-dim);font-size:13px;flex:none}
+.vmissing{color:var(--err);font-size:13px;font-weight:700;margin-top:8px}
+
+/* match card two-column */
+.match{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.match .colhead{font-family:'Playfair Display',serif;font-weight:800;font-size:17px;margin-bottom:10px}
+@media (max-width:820px){.match{grid-template-columns:1fr}.scenebtns{grid-template-columns:repeat(3,1fr)}}
+
+/* sponsors / zones / roster editors (stage 4) */
+.sprow{display:grid;grid-template-columns:22px 170px 105px 150px 46px 1fr 1fr auto;gap:8px;align-items:center}
+.plrow{display:grid;grid-template-columns:46px 165px 150px 82px 85px 150px auto auto auto;gap:8px;align-items:center}
+.thumb{width:46px;height:38px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;
+  display:grid;place-items:center;overflow:hidden;flex:none}
+.thumb img{max-width:100%;max-height:100%;object-fit:contain}
+.thumb.round{height:46px;border-radius:8px}
+.thumb.round img{width:100%;height:100%;object-fit:cover}
+.scenechips{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--cream-dim);margin-bottom:6px}
+.chip{padding:5px 12px;border-radius:999px;font-size:13px;text-transform:capitalize}
+.chip.on{background:var(--gold);color:var(--bg-deep);border-color:var(--gold)}
+.warn4{margin:10px 0 4px;background:var(--panel-2);border:1px solid var(--gold);color:var(--gold);
+  border-radius:8px;padding:10px 14px;font-weight:700;font-size:14px}
+.zonecols{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:12px}
+.zonecol{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+  display:flex;flex-direction:column;gap:10px;transition:opacity .2s}
+.zonecol.dimmed{opacity:.4}
+.zonecol h3{margin:0;display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+  text-transform:capitalize;font-size:13px;letter-spacing:.1em;color:var(--cream)}
+.colnote{font-size:10px;letter-spacing:.04em;color:var(--brick);text-transform:none;font-weight:700}
+.slotbox{border:1px solid rgba(241,231,211,.10);border-radius:8px;padding:10px;display:flex;
+  flex-direction:column;gap:8px;background:var(--panel)}
+.slotbox b{text-transform:capitalize}
+textarea{resize:vertical}
+@media (max-width:980px){.zonecols{grid-template-columns:1fr}.sprow,.plrow{grid-template-columns:1fr 1fr;grid-auto-rows:auto}}
+
+/* toasts */
+.toasts{position:fixed;right:22px;bottom:22px;display:flex;flex-direction:column;gap:8px;z-index:50}
+.toast{background:var(--panel-2);border:1px solid var(--gold);color:var(--cream);border-radius:8px;
+  padding:11px 16px;font-size:14px;box-shadow:0 10px 26px rgba(0,0,0,.45);max-width:380px}
+.toast.err{border-color:var(--err);color:var(--err)}
 a{color:var(--gold)}
-.demo-banner{display:none;background:var(--gold);color:var(--bg-deep);border-radius:10px;
-  padding:14px 24px;font-weight:800;letter-spacing:.06em;font-size:16px}
-.demo-banner.on{display:block}
-p.note{color:var(--cream-dim);font-size:14px;line-height:1.5}
+.footnote{margin-top:26px;color:var(--cream-dim);font-size:13px;line-height:1.6}
+code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
 </style>
 </head>
 <body>
+<div id="app" v-cloak>
 <div class="wrap">
-  <h1>SCC Broadcast Overlay <small>Admin — control panel</small></h1>
 
-  <!-- Persistent operator indicator: demo_mode shows fake players on the display -->
-  <div class="demo-banner" id="demoBanner">DEMO MODE IS ON — the display is showing the built-in demo game, not the live board</div>
+  <!-- ================= sticky operator strip ================= -->
+  <div class="topbar">
+    <h1>SCC Broadcast Overlay <small>Admin</small></h1>
 
-  <div class="card">
-    <h2>Server</h2>
-    <div class="row"><span class="k">Config API</span><span class="v" id="stApi">checking…</span></div>
-    <div class="row"><span class="k">Config hash</span><span class="v" id="stHash">—</span></div>
-    <div class="row"><span class="k">Display page</span><span class="v"><a href="/display.html" target="_blank">/display.html</a> (OBS browser source)</span></div>
+    <div class="pills">
+      <span class="pill" :class="apiOk ? 'good' : 'down'"><span class="led"></span>Config API <b>{{ apiOk ? 'OK' : 'unreachable' }}</b></span>
+      <span class="pill" :class="beatOk ? 'good' : 'down'"><span class="led"></span>Display <b>{{ beatOk ? 'live' : 'not connected' }}</b></span>
+      <span class="pill" :class="st && st.lc_connected ? 'good' : 'warn'"><span class="led"></span>LiveChess <b>{{ st ? (st.lc_connected ? 'connected' : 'not connected') : '—' }}</b></span>
+      <span class="pill good" v-if="beatOk"><span class="led" style="background:var(--brick)"></span>On air <b style="text-transform:capitalize">{{ st.scene }}</b><span v-if="seqInfo">· {{ seqInfo.name }}</span></span>
+      <span class="pill" :class="st && st.confidence === 'good' ? 'good' : 'warn'" v-if="beatOk">
+        <span class="led"></span>Detection <b>{{ st.detected }}</b><span>({{ st.confidence }})</span></span>
+    </div>
+
+    <!-- persistent operator indicator: demo_mode puts fake players on the display -->
+    <div class="demo-banner" v-if="cfg && cfg.board.demo_mode">
+      <span>DEMO MODE IS ON — the display is showing the built-in demo game with fake player names, not the live board.</span>
+      <button @click="setDemo(false)">Turn off</button>
+    </div>
+
+    <!-- cancellable pending automatic transition -->
+    <div class="pending" v-if="pendingAuto">
+      <span>Auto transition pending: <b>{{ pendingAuto.action === 'game_start' ? 'game start sequence' : 'game end sequence' }}</b>
+        <span v-if="pendingAuto.reason">— {{ pendingAuto.reason }}</span>
+        — fires in <b>{{ fmtCountdown(pendingAuto.fires_at - now) }}</b></span>
+      <button class="cancelbtn" @click="cancelPending">Cancel</button>
+    </div>
+
+    <nav class="tabs">
+      <button v-for="t in tabs" :key="t.id" class="tab" :class="{on: tab === t.id}"
+              :disabled="!!t.soon" @click="switchTab(t.id)">
+        {{ t.label }}
+        <span class="soon" v-if="t.soon">{{ t.soon }}</span>
+        <span class="dot" v-else-if="tabDirty(t.id)" title="unsaved changes"></span>
+      </button>
+    </nav>
   </div>
 
-  <div class="card">
-    <h2>Coming in the next stages</h2>
-    <p class="note">
-      This is the stage-one placeholder. The full control panel — scene switching and
-      sequences, event settings, sponsor and zone management, players, intermission video
-      and Pairingsman — is delivered in the admin stage. Config lives in <code>config/*.json</code>
-      and can be hand-edited meanwhile; the display picks changes up within the poll interval.
-    </p>
-  </div>
+  <!-- ============================ LIVE ============================ -->
+  <!-- every tab section is v-if="cfg": drafts exist only after the first
+       config fetch, and v-show alone would evaluate their bindings early -->
+  <section v-if="cfg" v-show="tab === 'live'">
+    <div class="card">
+      <h2>Scene</h2>
+      <p class="sub">Gold = on air (what the display reports). The underline marks the configured target while a transition or sequence is still getting there. Switching manually clears any running sequence and pending auto transition.</p>
+      <div class="scenebtns">
+        <button v-for="s in SCENES" :key="s" class="scenebtn"
+                :class="{onair: st && st.scene === s, target: cfg && cfg.scenes.active === s && !(st && st.scene === s)}"
+                @click="setScene(s)">{{ s }}</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Sequences &amp; automatic transitions</h2>
+      <div class="btns">
+        <button @click="startSeq('game_start')">▶ Game start <small style="font-weight:400">(versus {{ (seqCfg.game_start.versus_ms/1000).toFixed(0) }}s → game)</small></button>
+        <button @click="startSeq('game_end')">▶ Game end <small style="font-weight:400">(postgame {{ (seqCfg.game_end.postgame_ms/1000).toFixed(0) }}s → start {{ (seqCfg.game_end.start_ms/1000).toFixed(0) }}s → intermission)</small></button>
+      </div>
+      <div class="seqrow" v-if="seqInfo">
+        <div class="seqprog">Running <b>{{ seqInfo.name }}</b> — {{ seqInfo.text }}</div>
+        <button class="cancelbtn" @click="stopSeq">Stop here</button>
+      </div>
+      <h3>Automatic switching</h3>
+      <label class="chk">
+        <input type="checkbox" :checked="autoEnabled" @change="setAuto($event.target.checked)">
+        Propose scene changes from board state
+        <small>&nbsp;— game start / game end are detected from LiveChess; each proposal waits {{ ((cfg ? cfg.scenes.auto.arm_delay_ms : 4000)/1000).toFixed(0) }}s (cancellable above) before firing. Disconnects and low confidence suppress proposals.</small>
+      </label>
+    </div>
+
+    <div class="card">
+      <h2>Postgame result</h2>
+      <p class="sub">Shown on the postgame scene. Presets write immediately; the field is for anything else (e.g. “White wins on forfeit”). Automatic results arrive with the PGN and Pairingsman stages.</p>
+      <div class="btns" style="margin-bottom:12px">
+        <button @click="saveResult('1–0')">1–0</button>
+        <button @click="saveResult('½–½')">½–½</button>
+        <button @click="saveResult('0–1')">0–1</button>
+        <button class="ghost" @click="saveResult('')">Clear</button>
+      </div>
+      <div class="unit">
+        <input type="text" v-model="drafts.result" placeholder="Custom result text" @keyup.enter="saveResult(drafts.result)">
+        <button class="primary" @click="saveResult(drafts.result)">Set</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Match — manual players</h2>
+      <p class="sub">Drives the player cards on the game, versus and postgame scenes. Photos, the club roster and Pairingsman auto-fill arrive in their stages — these fields are the manual mode and always work.</p>
+      <div class="match">
+        <div v-for="side in ['white','black']" :key="side">
+          <div class="colhead">{{ side === 'white' ? 'White' : 'Black' }}</div>
+          <div class="frm">
+            <div class="f wide"><label>Name</label><input type="text" v-model="drafts.match[side].name" placeholder="—"></div>
+            <div class="f"><label>Title</label><input type="text" v-model="drafts.match[side].title" placeholder="CM, WFM…"></div>
+            <div class="f"><label>Rating</label><input type="text" v-model="drafts.match[side].rating" placeholder="1685"></div>
+            <div class="f"><label>Record</label><input type="text" v-model="drafts.match[side].record" placeholder="3½ / 4"></div>
+          </div>
+        </div>
+      </div>
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.match">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.match">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.match" @click="revert('match')">Revert</button>
+        <button class="primary" :disabled="!dirty.match || saving" @click="saveMatch">Save players</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Demo mode</h2>
+      <p class="sub">Shows the built-in demo game (fake names, fixed position) instead of the live board — useful for designing scenes and sponsor layouts with no board present. It can never switch itself on; the banner above stays up while it is.</p>
+      <label class="chk">
+        <input type="checkbox" :checked="cfg && cfg.board.demo_mode" @change="setDemo($event.target.checked)">
+        Demo mode <small>&nbsp;— fake player names on the display while on</small>
+      </label>
+    </div>
+  </section>
+
+  <!-- ============================ EVENT ============================ -->
+  <section v-if="cfg" v-show="tab === 'event'">
+    <div class="card">
+      <h2>Event</h2>
+      <p class="sub">Titles and metadata shown across the scenes. Saved to <code>general.json</code>; the display picks changes up within ~half a second.</p>
+      <div class="frm">
+        <div class="f wide"><label>Event title</label><input type="text" v-model="drafts.event.event_title"></div>
+        <div class="f"><label>Season</label><input type="text" v-model="drafts.event.season" placeholder="Season 2026"></div>
+        <div class="f"><label>Round</label><input type="text" v-model="drafts.event.round" placeholder="Round 4"></div>
+        <div class="f"><label>Time control</label><input type="text" v-model="drafts.event.time_control" placeholder="90′ + 30″"></div>
+        <div class="f"><label>Location</label><input type="text" v-model="drafts.event.location"></div>
+        <div class="f"><label>Table name <span style="text-transform:none">(overrides number)</span></label><input type="text" v-model="drafts.event.table_name" placeholder="Feature table"></div>
+        <div class="f"><label>Table number</label><input type="number" min="1" v-model="drafts.event.table_number"></div>
+        <div class="f"><label>Website</label><input type="text" v-model="drafts.event.website"></div>
+      </div>
+
+      <h3>Times (start scene)</h3>
+      <div class="frm">
+        <div class="f"><label>Running time — start</label><input type="time" v-model="drafts.event.running_time_start"></div>
+        <div class="f"><label>Running time — end</label><input type="time" v-model="drafts.event.running_time_end"></div>
+        <div class="f"><label>Feature match time <span style="text-transform:none">(manual fallback)</span></label><input type="time" v-model="drafts.event.feature_match_time"></div>
+      </div>
+
+      <h3>Social links (footer)</h3>
+      <div class="rows">
+        <div class="rowitem social" v-for="(s, i) in drafts.event.social_links" :key="i">
+          <input type="text" v-model="s.label" placeholder="chess.com">
+          <input type="text" v-model="s.url" placeholder="URL (optional, not shown on stream)">
+          <button class="rowdel" @click="drafts.event.social_links.splice(i,1)">✕</button>
+        </div>
+        <div><button class="ghost" @click="drafts.event.social_links.push({label:'', url:''})">+ Add link</button></div>
+      </div>
+
+      <h3>Next broadcast (ending scene)</h3>
+      <div class="frm">
+        <div class="f"><label>Mode</label>
+          <select v-model="drafts.event.nb_mode">
+            <option value="auto">Auto — computed{{ '' }} (Pairingsman next meeting when connected)</option>
+            <option value="manual">Manual — as typed below</option>
+            <option value="hidden">Hidden</option>
+          </select>
+        </div>
+        <div class="f"><label>Label</label><input type="text" v-model="drafts.event.nb_label" placeholder="Next broadcast"></div>
+        <div class="f"><label>Manual date <span style="text-transform:none">(free text)</span></label><input type="text" v-model="drafts.event.nb_date" placeholder="Thursday 30 July" :disabled="drafts.event.nb_mode !== 'manual'"></div>
+        <div class="f"><label>Manual time <span style="text-transform:none">(free text)</span></label><input type="text" v-model="drafts.event.nb_time" placeholder="7:30 pm" :disabled="drafts.event.nb_mode !== 'manual'"></div>
+        <div class="f"><label>Recurrence (auto default)</label><div class="unit"><input type="number" min="1" v-model="drafts.event.nb_days"><span>days on, same running time</span></div></div>
+      </div>
+
+      <h3>Advanced</h3>
+      <div class="frm">
+        <div class="f"><label>Config poll interval</label><div class="unit"><input type="number" min="150" step="50" v-model="drafts.event.config_poll_ms"><span>ms (display ↔ this server; local disk only)</span></div></div>
+      </div>
+
+      <div class="savebar">
+        <span class="errmsg" v-if="errs.event">{{ errs.event }}</span>
+        <span class="dirty" v-else-if="dirty.event">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.event">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.event" @click="revert('event')">Revert</button>
+        <button class="primary" :disabled="!dirty.event || saving" @click="saveEvent">Save event settings</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ BOARD ============================ -->
+  <section v-if="cfg" v-show="tab === 'board'">
+    <div class="card">
+      <h2>Board &amp; LiveChess</h2>
+      <p class="sub">LiveChess runs on this machine, so the connection is <b>127.0.0.1:{{ drafts.board.port || 1982 }}</b> and survives the tethered connection changing IP. The override below is the two-machine fallback only. Saved to <code>board.json</code>.</p>
+      <div class="frm">
+        <div class="f"><label>Board serial</label><input type="text" v-model="drafts.board.serialnr"></div>
+        <div class="f"><label>LiveChess port</label><input type="number" min="1" max="65535" v-model="drafts.board.port"></div>
+        <div class="f"><label>Feed poll</label><div class="unit"><input type="number" min="200" step="100" v-model="drafts.board.poll_ms"><span>ms (eboards poll over the websocket)</span></div></div>
+      </div>
+      <h3>Manual host override (two-machine setup)</h3>
+      <div class="frm">
+        <div class="f wide">
+          <label class="chk" style="text-transform:none;letter-spacing:0">
+            <input type="checkbox" v-model="drafts.board.manual_host_override">
+            Override the LiveChess host <small>&nbsp;— only when LiveChess runs on a different machine</small>
+          </label>
+        </div>
+        <div class="f wide"><label>Host <span style="text-transform:none">(hostname or IP, port optional)</span></label>
+          <input type="text" v-model="drafts.board.manual_host" placeholder="192.168.1.50 or 192.168.1.50:1982" :disabled="!drafts.board.manual_host_override"></div>
+      </div>
+      <p class="hint" style="margin-top:12px">
+        Effective connection now: <b>{{ effectiveHostLabel }}</b> — {{ st && st.lc_connected ? 'connected' : 'not connected' }}.<br>
+        Saving a changed host reconnects the feed. Changing the <b>serial</b> starts tracking a different physical board, which resets the move list — the display never wipes moves for any other config change.
+      </p>
+
+      <h3>Per-move times &amp; game PGN</h3>
+      <div class="frm">
+        <div class="f wide">
+          <label class="chk" style="text-transform:none;letter-spacing:0">
+            <input type="checkbox" v-model="drafts.board.move_times">
+            Show per-move times beside each move
+            <small>&nbsp;— from PGN clock annotations where the PGN matches the observed game, otherwise from observed clock changes</small>
+          </label>
+        </div>
+        <div class="f wide">
+          <label class="chk" style="text-transform:none;letter-spacing:0">
+            <input type="checkbox" v-model="drafts.board.pgn_enabled">
+            Probe LiveChess for the game PGN
+            <small>&nbsp;— cross-checks the observed game and refines the times; harmless if LiveChess serves no PGN</small>
+          </label>
+        </div>
+        <div class="f wide"><label>PGN URL override <span style="text-transform:none">(optional)</span></label>
+          <input type="text" v-model="drafts.board.pgn_url" placeholder="auto-probe /pgn on the LiveChess host" :disabled="!drafts.board.pgn_enabled"></div>
+        <div class="f"><label>PGN poll</label><div class="unit"><input type="number" min="2" step="1" v-model="drafts.board.pgn_poll_s" :disabled="!drafts.board.pgn_enabled"><span>s (slow by design)</span></div></div>
+      </div>
+      <p class="hint" style="margin-top:10px">PGN status: <b>{{ pgnStatusLabel }}</b><span v-if="st && st.pgn && st.pgn.source"> — source {{ st.pgn.source }}</span></p>
+      <div class="savebar">
+        <span class="errmsg" v-if="errs.board">{{ errs.board }}</span>
+        <span class="dirty" v-else-if="dirty.board">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.board">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.board" @click="revert('board')">Revert</button>
+        <button class="primary" :disabled="!dirty.board || saving" @click="saveBoard">Save board settings</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================= TRANSITIONS ========================= -->
+  <section v-if="cfg" v-show="tab === 'transitions'">
+    <div class="card">
+      <h2>Default transition</h2>
+      <p class="sub">Used whenever a scene has no override of its own. Saved to <code>scenes.json</code> — scene switching keeps working while you edit; runtime state is never touched by this form.</p>
+      <div class="frm">
+        <div class="f"><label>Type</label>
+          <select v-model="drafts.trans.def.type"><option v-for="t in TTYPES" :value="t">{{ t }}</option></select></div>
+        <div class="f"><label>Duration</label><div class="unit"><input type="number" min="0" step="100" v-model="drafts.trans.def.duration_ms" :disabled="drafts.trans.def.type==='cut'"><span>ms</span></div></div>
+        <div class="f"><label>Delay</label><div class="unit"><input type="number" min="0" step="100" v-model="drafts.trans.def.delay_ms"><span>ms</span></div></div>
+        <div class="f" v-if="drafts.trans.def.type==='slide' || drafts.trans.def.type==='wipe'"><label>Direction</label>
+          <select v-model="drafts.trans.def.direction"><option v-for="d in DIRS" :value="d">{{ d }}</option></select></div>
+      </div>
+
+      <h3>Per-type defaults (apply when that type is chosen and the scene sets nothing)</h3>
+      <table class="ttable">
+        <tr><th>Type</th><th>Duration (ms)</th><th>Delay (ms)</th><th>Direction</th></tr>
+        <tr v-for="t in TTYPES" :key="t">
+          <td>{{ t }}</td>
+          <template v-if="t === 'cut'"><td colspan="3" class="na">instant — no parameters</td></template>
+          <template v-else>
+            <td><input type="number" min="0" step="100" v-model="drafts.trans.types[t].duration_ms" placeholder="inherit"></td>
+            <td><input type="number" min="0" step="100" v-model="drafts.trans.types[t].delay_ms" placeholder="inherit"></td>
+            <td>
+              <select v-if="t==='slide' || t==='wipe'" v-model="drafts.trans.types[t].direction">
+                <option value="">inherit</option><option v-for="d in DIRS" :value="d">{{ d }}</option>
+              </select>
+              <span class="na" v-else>—</span>
+            </td>
+          </template>
+        </tr>
+      </table>
+
+      <h3>Per-scene override (on entering that scene)</h3>
+      <table class="ttable">
+        <tr><th>Scene</th><th>Transition</th><th>Duration (ms)</th><th>Delay (ms)</th><th>Direction</th></tr>
+        <tr v-for="s in SCENES" :key="s">
+          <td>{{ s }}</td>
+          <td><select v-model="drafts.trans.perScene[s].mode">
+            <option value="">use default</option><option v-for="t in TTYPES" :value="t">{{ t }}</option>
+          </select></td>
+          <template v-if="drafts.trans.perScene[s].mode && drafts.trans.perScene[s].mode !== 'cut'">
+            <td><input type="number" min="0" step="100" v-model="drafts.trans.perScene[s].duration_ms" placeholder="inherit"></td>
+            <td><input type="number" min="0" step="100" v-model="drafts.trans.perScene[s].delay_ms" placeholder="inherit"></td>
+            <td><select v-if="drafts.trans.perScene[s].mode==='slide' || drafts.trans.perScene[s].mode==='wipe'" v-model="drafts.trans.perScene[s].direction">
+              <option value="">inherit</option><option v-for="d in DIRS" :value="d">{{ d }}</option></select>
+              <span class="na" v-else>—</span></td>
+          </template>
+          <template v-else><td colspan="3" class="na">{{ drafts.trans.perScene[s].mode === 'cut' ? 'instant' : 'default transition applies' }}</td></template>
+        </tr>
+      </table>
+
+      <h3>Sequence timings</h3>
+      <div class="frm">
+        <div class="f"><label>Game start: versus dwell</label><div class="unit"><input type="number" min="1" step="1" v-model="drafts.trans.seq.versus_s"><span>s, then game</span></div></div>
+        <div class="f"><label>Game end: postgame dwell</label><div class="unit"><input type="number" min="1" step="1" v-model="drafts.trans.seq.postgame_s"><span>s</span></div></div>
+        <div class="f"><label>Game end: start dwell</label><div class="unit"><input type="number" min="1" step="1" v-model="drafts.trans.seq.start_s"><span>s, then intermission</span></div></div>
+        <div class="f"><label>Auto transition arm delay</label><div class="unit"><input type="number" min="1" step="1" v-model="drafts.trans.arm_s"><span>s cancel window</span></div></div>
+      </div>
+
+      <div class="savebar">
+        <span class="errmsg" v-if="errs.trans">{{ errs.trans }}</span>
+        <span class="dirty" v-else-if="dirty.trans">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.trans">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.trans" @click="revert('trans')">Revert</button>
+        <button class="primary" :disabled="!dirty.trans || saving" @click="saveTrans">Save transitions</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================= INTERMISSION ========================= -->
+  <section v-if="cfg" v-show="tab === 'intermission'">
+    <div class="card">
+      <h2>Intermission video</h2>
+      <p class="sub">Files are placed manually in <code>assets/video/</code> (not uploaded) — drop them in, then Rescan. With no video selected the scene shows the branded “Back shortly” card.</p>
+      <div class="btns" style="margin-bottom:12px"><button class="ghost" @click="loadVideos(true)">Rescan folder</button></div>
+      <div class="vlist">
+        <div class="vitem" :class="{sel: drafts.inter.video === ''}" @click="drafts.inter.video = ''">
+          <span class="nm">No video — branded “Back shortly” card</span>
+        </div>
+        <div class="vitem" v-for="v in videos" :key="v.name" :class="{sel: drafts.inter.video === v.name}" @click="drafts.inter.video = v.name">
+          <span class="nm">{{ v.name }}</span>
+          <span class="meta">{{ fmtBytes(v.size) }}</span>
+        </div>
+      </div>
+      <div class="vmissing" v-if="configuredVideoMissing">Configured file “{{ drafts.inter.video }}” is not in assets/video/ — the scene will show the fallback card until it reappears.</div>
+
+      <h3>Playback</h3>
+      <div class="frm">
+        <div class="f"><label class="chk" style="text-transform:none;letter-spacing:0"><input type="checkbox" v-model="drafts.inter.loop"> Loop</label></div>
+        <div class="f"><label class="chk" style="text-transform:none;letter-spacing:0"><input type="checkbox" v-model="drafts.inter.muted"> Muted</label></div>
+      </div>
+
+      <h3>On returning to intermission</h3>
+      <div class="frm">
+        <div class="f wide">
+          <select v-model="drafts.inter.resume_mode">
+            <option value="chapter">Resume from the start of the interrupted chapter (default — whole video eventually airs)</option>
+            <option value="exact">Resume from the exact interruption point</option>
+            <option value="rewind">Rewind a little from the interruption point</option>
+            <option value="restart">Restart from the beginning every time</option>
+          </select>
+        </div>
+        <div class="f" v-if="drafts.inter.resume_mode === 'rewind'"><label>Rewind by</label><div class="unit"><input type="number" min="1" step="1" v-model="drafts.inter.rewind_s"><span>s</span></div></div>
+      </div>
+
+      <h3>Chapters (start offsets)</h3>
+      <p class="sub">Used by chapter resume. Accepts seconds or m:ss / h:mm:ss. Progress is remembered across display reloads.</p>
+      <div class="rows">
+        <div class="rowitem chapter" v-for="(c, i) in drafts.inter.chapters" :key="i">
+          <input type="text" v-model="c.txt" placeholder="0:00">
+          <span class="mini">{{ chapterPreview(c.txt) }}</span>
+          <button class="rowdel" @click="drafts.inter.chapters.splice(i,1)">✕</button>
+        </div>
+        <div><button class="ghost" @click="drafts.inter.chapters.push({txt:''})">+ Add chapter</button></div>
+      </div>
+
+      <div class="savebar">
+        <span class="errmsg" v-if="errs.inter">{{ errs.inter }}</span>
+        <span class="dirty" v-else-if="dirty.inter">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.inter">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.inter" @click="revert('inter')">Revert</button>
+        <button class="primary" :disabled="!dirty.inter || saving" @click="saveInter">Save intermission</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= SPONSORS & ZONES ======================= -->
+  <section v-if="cfg" v-show="tab === 'zones'">
+    <div class="card">
+      <h2>Sponsors</h2>
+      <p class="sub">The sponsor pool. Zones below assign a tier and rotate through the <b>active</b> sponsors in it. Logos live in <code>assets/sponsors/</code> — upload here, or drop files in the folder and Rescan. A sponsor's optional header replaces “Proudly supported by” while it is on screen.</p>
+      <div class="btns" style="margin-bottom:12px">
+        <button class="ghost" @click="pickUpload('sponsors')">Upload logo…</button>
+        <button class="ghost" @click="loadAssets('sponsors', true)">Rescan folder</button>
+      </div>
+      <div class="rows">
+        <div class="sprow" v-for="(s, i) in drafts.sponsors.list" :key="i">
+          <input type="checkbox" v-model="s.active" title="Active — eligible for zones">
+          <input type="text" v-model="s.name" placeholder="Sponsor name">
+          <select v-model="s.tier"><option v-for="t in TIERS" :value="t">{{ t }}</option></select>
+          <select v-model="s.image">
+            <option value="">no image</option>
+            <option v-for="f in assets.sponsors" :key="f.name" :value="f.name">{{ f.name }}</option>
+          </select>
+          <span class="thumb"><img v-if="s.image" :src="'/assets/sponsors/' + encodeURIComponent(s.image)" alt=""></span>
+          <input type="text" v-model="s.header" placeholder="Header (optional)">
+          <input type="text" v-model="s.message" placeholder="Message (optional)">
+          <button class="rowdel" @click="drafts.sponsors.list.splice(i, 1)">✕</button>
+        </div>
+        <div><button class="ghost" @click="drafts.sponsors.list.push({name:'', tier:'regular', image:'', message:'', header:'', active:true})">+ Add sponsor</button></div>
+      </div>
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.sponsors">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.sponsors">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.sponsors" @click="revert('sponsors')">Revert</button>
+        <button class="primary" :disabled="!dirty.sponsors || saving" @click="saveSponsors">Save sponsors</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Zones</h2>
+      <p class="sub">Three columns — left, centre, right — each whole or split into top + bottom (six slots at most). Open scenes (start, versus, postgame, ending) show every column as a bottom band; the <b>game scene shows the right column under the moves</b>, and the funder credit stays beneath it. A slot with no tier assigned shows the designed “advertise here” invite.</p>
+
+      <div class="scenechips">
+        <span>Availability in scene:</span>
+        <button v-for="s in SCENES" :key="s" class="chip" :class="{on: zoneScene === s}" @click="zoneScene = s">{{ s }}</button>
+      </div>
+      <label class="chk" style="margin:8px 0 2px">
+        <input type="checkbox" :checked="stripOn" @change="setStrip($event.target.checked)">
+        Game-scene bottom strip
+        <small>&nbsp;— relocates all three columns into a strip above the game footer (left and centre gain a game-scene home; right moves down with them so nothing shows twice). OFF = the game scene renders exactly as today.</small>
+      </label>
+      <div class="warn4" v-if="activeSlotCount > 4">⚠ {{ activeSlotCount }} slots active — four is the practical on-stream limit. The display renders them all, but consider deactivating some.</div>
+
+      <div class="zonecols">
+        <div class="zonecol" v-for="col in COLS" :key="col" :class="{dimmed: colDimmed(col)}">
+          <h3>{{ col }}<span class="colnote" v-if="colDimmed(col)">not in {{ zoneScene }}{{ zoneScene === 'game' ? ' — enable the strip' : '' }}</span></h3>
+          <label class="chk"><input type="checkbox" v-model="drafts.zones.cols[col].split"> Split into top + bottom</label>
+          <div class="slotbox" v-for="id in colSlotIds(col)" :key="id">
+            <label class="chk"><input type="checkbox" v-model="drafts.zones.slots[id].active"> <b>{{ slotLabel(id) }}</b></label>
+            <template v-if="drafts.zones.slots[id].active">
+              <select v-model="drafts.zones.slots[id].srcSel">
+                <option value="advertise">“Advertise here” invite</option>
+                <option v-for="t in TIERS" :key="t" :value="'tier:' + t">Sponsors — {{ t }}</option>
+                <option value="data">Data block</option>
+              </select>
+              <template v-if="String(drafts.zones.slots[id].srcSel).startsWith('tier:')">
+                <div class="unit"><input type="number" min="2" step="1" v-model="drafts.zones.slots[id].rotate_s"><span>s rotation</span></div>
+                <select v-model="drafts.zones.slots[id].show">
+                  <option value="both">image + message</option>
+                  <option value="image">image only</option>
+                  <option value="message">message only</option>
+                </select>
+              </template>
+              <template v-if="drafts.zones.slots[id].srcSel === 'data'">
+                <select v-model="drafts.zones.slots[id].data_kind">
+                  <option value="tournament_leaderboard">Tournament leaderboard</option>
+                  <option value="meeting_leaderboard">Meeting leaderboard</option>
+                  <option value="concurrent_pairings">Concurrent pairings</option>
+                  <option value="results">Results</option>
+                </select>
+                <select v-model="drafts.zones.slots[id].data_mode">
+                  <option value="manual">Manual — lines below</option>
+                  <option value="auto">Auto — Pairingsman (its stage; falls back to the lines)</option>
+                  <option value="hidden">Hidden</option>
+                </select>
+                <input type="text" v-model="drafts.zones.slots[id].data_title" placeholder="Title (optional)">
+                <textarea rows="3" v-model="drafts.zones.slots[id].lines" placeholder="One display line per row"></textarea>
+              </template>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.zones">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.zones">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.zones" @click="revert('zones')">Revert</button>
+        <button class="primary" :disabled="!dirty.zones || saving" @click="saveZones">Save zones</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Council funder credit</h2>
+      <p class="sub">The Greater Shepparton City Council acknowledgement under the moves panel — preserved exactly as it renders today. The wording is the required funder credit: <b>get council sign-off before changing it on stream.</b></p>
+      <div class="frm">
+        <div class="f wide">
+          <label class="chk" style="text-transform:none;letter-spacing:0">
+            <input type="checkbox" v-model="drafts.funder.enabled"> Show the funder credit
+          </label>
+        </div>
+        <div class="f wide"><label>Text</label><input type="text" v-model="drafts.funder.text"></div>
+        <div class="f wide"><label>Logo path</label><input type="text" v-model="drafts.funder.logo" placeholder="/assets/img/gscc-white.png"></div>
+      </div>
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.funder">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.funder">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.funder" @click="revert('funder')">Revert</button>
+        <button class="primary" :disabled="!dirty.funder || saving" @click="saveFunder">Save funder credit</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ PLAYERS ============================ -->
+  <section v-if="cfg" v-show="tab === 'players'">
+    <div class="card">
+      <h2>Photo policy</h2>
+      <div class="frm">
+        <div class="f wide">
+          <select v-model="drafts.roster.mode">
+            <option value="photos_and_avatars">Photos where available, initials avatar otherwise</option>
+            <option value="photos_only">Photos only — players without a photo show no visual</option>
+            <option value="no_photos">No photos and no avatars</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:10px">Applies everywhere a player appears (game cards, versus, postgame). A player with photo use off is treated as having no photo. Saved with the roster below.</p>
+    </div>
+
+    <div class="card">
+      <h2>Roster</h2>
+      <p class="sub">Club players with photos, ratings and records (either 1–4 or 4–1–2 style). “→ White / → Black” copies a player into the manual match fields on the Live tab — photo included when photo use is on; the title clears, set it there if needed. Photos live in <code>assets/players/</code>.</p>
+      <div class="btns" style="margin-bottom:12px">
+        <button class="ghost" @click="pickUpload('players')">Upload photo…</button>
+        <button class="ghost" @click="loadAssets('players', true)">Rescan folder</button>
+      </div>
+      <div class="rows">
+        <div class="plrow" v-for="(p, i) in drafts.roster.list" :key="i">
+          <span class="thumb round"><img v-if="p.photo" :src="'/assets/players/' + encodeURIComponent(p.photo)" alt=""></span>
+          <input type="text" v-model="p.name" placeholder="Display name">
+          <select v-model="p.photo">
+            <option value="">no photo</option>
+            <option v-for="f in assets.players" :key="f.name" :value="f.name">{{ f.name }}</option>
+          </select>
+          <label class="chk" title="Per-player photo use"><input type="checkbox" v-model="p.use_photo"> photo</label>
+          <input type="text" v-model="p.rating" placeholder="rating">
+          <input type="text" v-model="p.record" placeholder="record">
+          <button @click="assignSide('white', p)">→ White</button>
+          <button @click="assignSide('black', p)">→ Black</button>
+          <button class="rowdel" @click="drafts.roster.list.splice(i, 1)">✕</button>
+        </div>
+        <div><button class="ghost" @click="drafts.roster.list.push({name:'', photo:'', use_photo:true, rating:'', record:''})">+ Add player</button></div>
+      </div>
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.roster">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.roster">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.roster" @click="revert('roster')">Revert</button>
+        <button class="primary" :disabled="!dirty.roster || saving" @click="saveRoster">Save roster &amp; photo policy</button>
+      </div>
+    </div>
+  </section>
+
+  <p class="footnote">
+    Display page for OBS: <a href="/display.html" target="_blank">/display.html</a> (1920×1080 browser source).
+    Config lives in <code>config/*.json</code>; hand edits are picked up live and appear here unless a tab has unsaved changes.
+  </p>
+
+  <input type="file" id="upSponsors" accept=".png,.jpg,.jpeg,.webp,.gif,.svg" style="display:none" @change="onUpload('sponsors', $event)">
+  <input type="file" id="upPlayers" accept=".png,.jpg,.jpeg,.webp,.gif,.svg" style="display:none" @change="onUpload('players', $event)">
+
+  <div class="toasts"><div class="toast" v-for="t in toasts" :key="t.id" :class="{err: t.kind==='err'}">{{ t.msg }}</div></div>
+</div>
 </div>
 
+<script src="/vendor/vue.global.js"></script>
 <script>
 "use strict";
 (function () {
-  async function tick() {
-    try {
-      const r = await fetch("/api/config", { cache: "no-store" });
-      const j = await r.json();
-      document.getElementById("stApi").textContent = "OK";
-      document.getElementById("stApi").className = "v ok";
-      document.getElementById("stHash").textContent = j.hash;
-      document.getElementById("demoBanner").className =
-        "demo-banner" + (j.config.board.demo_mode ? " on" : "");
-    } catch (e) {
-      document.getElementById("stApi").textContent = "unreachable";
-      document.getElementById("stApi").className = "v bad";
-    }
-    setTimeout(tick, 2000);
+  const { createApp, reactive, computed, ref } = Vue;
+
+  const SCENES = ["start", "versus", "game", "postgame", "intermission", "ending"];
+  const TTYPES = ["cut", "fade", "crossfade", "slide", "wipe"];
+  const DIRS = ["left", "right", "up", "down"];
+  const TIERS = ["premier", "major", "regular", "minor"];
+  const COLS = ["left", "centre", "right"];
+  const KINDS = ["tournament_leaderboard", "meeting_leaderboard", "concurrent_pairings", "results"];
+  const SLOT_IDS = [
+    "left", "left_top", "left_bottom",
+    "centre", "centre_top", "centre_bottom",
+    "right", "right_top", "right_bottom",
+  ];
+  const TABS = [
+    { id: "live", label: "Live" },
+    { id: "event", label: "Event" },
+    { id: "board", label: "Board" },
+    { id: "transitions", label: "Transitions" },
+    { id: "intermission", label: "Intermission" },
+    { id: "zones", label: "Sponsors & Zones" },
+    { id: "players", label: "Players" },
+    { id: "pairingsman", label: "Pairingsman", soon: "stage 6" },
+  ];
+
+  /* ------------------------------------------------------------ helpers */
+
+  const jclone = (o) => JSON.parse(JSON.stringify(o));
+  const jeq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  function toNum(v, fallback, min, max) {
+    const n = Number(v);
+    if (v === "" || v === null || v === undefined || Number.isNaN(n)) return fallback;
+    let out = n;
+    if (min !== undefined) out = Math.max(min, out);
+    if (max !== undefined) out = Math.min(max, out);
+    return out;
   }
-  tick();
+  // "90" | "1:30" | "1:02:03" → seconds, or NaN
+  function parseClock(txt) {
+    const s = String(txt).trim();
+    if (s === "") return NaN;
+    if (/^\d+(\.\d+)?$/.test(s)) return Number(s);
+    const m = /^(\d+):([0-5]?\d)(?::([0-5]?\d))?$/.exec(s);
+    if (!m) return NaN;
+    return m[3] !== undefined
+      ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+      : Number(m[1]) * 60 + Number(m[2]);
+  }
+  function fmtClock(sec) {
+    sec = Math.max(0, Math.round(sec));
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  async function getJSON(url) {
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) throw new Error(url + " → " + r.status);
+    return r.json();
+  }
+  async function postConfig(name, body) {
+    const r = await fetch("/api/config/" + name, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) throw new Error(j.error || name + " write failed");
+  }
+  const freshConfig = async () => (await getJSON("/api/config")).config;
+
+  /* -------------------------------------------------- draft constructors
+     Each tab edits a DRAFT built from the merged config by a pure function;
+     dirtiness = draft differs from the baseline captured at build time. On
+     save the draft is applied onto a FRESH copy of its file, touching only
+     the keys this tab owns. */
+
+  function draftEvent(c) {
+    const g = c.general, nb = g.next_broadcast || {};
+    return {
+      event_title: g.event_title || "", season: g.season || "", round: g.round || "",
+      time_control: g.time_control || "", location: g.location || "",
+      table_name: g.table_name || "", table_number: g.table_number ?? 1,
+      website: g.website || "",
+      running_time_start: g.running_time_start || "", running_time_end: g.running_time_end || "",
+      feature_match_time: g.feature_match_time || "",
+      social_links: jclone(g.social_links || []),
+      nb_mode: nb.mode || "auto", nb_label: nb.label || "Next broadcast",
+      nb_date: nb.manual_date || "", nb_time: nb.manual_time || "",
+      nb_days: nb.recurrence_days ?? 7,
+      config_poll_ms: g.config_poll_ms ?? 500,
+    };
+  }
+
+  function draftBoard(c) {
+    const b = c.board, p = b.pgn || {};
+    return {
+      serialnr: b.serialnr || "", port: b.port ?? 1982, poll_ms: b.poll_ms ?? 800,
+      manual_host_override: !!b.manual_host_override, manual_host: b.manual_host || "",
+      move_times: b.move_times !== false,
+      pgn_enabled: p.enabled !== false,
+      pgn_url: p.url || "",
+      pgn_poll_s: (Number(p.poll_ms) || 6000) / 1000,
+    };
+  }
+
+  function draftTrans(c) {
+    const sc = c.scenes;
+    const def = sc.default_transition || {};
+    const types = {};
+    for (const t of TTYPES) {
+      if (t === "cut") continue;
+      const td = (sc.transitions || {})[t] || {};
+      types[t] = {
+        duration_ms: td.duration_ms ?? "", delay_ms: td.delay_ms ?? "",
+        direction: (t === "slide" || t === "wipe") ? (td.direction || "") : "",
+      };
+    }
+    const perScene = {};
+    for (const s of SCENES) {
+      const ov = ((sc.scenes || {})[s] || {}).transition || null;
+      perScene[s] = ov
+        ? { mode: ov.type || "", duration_ms: ov.duration_ms ?? "", delay_ms: ov.delay_ms ?? "", direction: ov.direction || "" }
+        : { mode: "", duration_ms: "", delay_ms: "", direction: "" };
+    }
+    const q = sc.sequences || {};
+    return {
+      def: {
+        type: def.type || "fade", duration_ms: def.duration_ms ?? 1000,
+        delay_ms: def.delay_ms ?? 0, direction: def.direction || "left",
+      },
+      types, perScene,
+      seq: {
+        versus_s: ((q.game_start || {}).versus_ms ?? 8000) / 1000,
+        postgame_s: ((q.game_end || {}).postgame_ms ?? 40000) / 1000,
+        start_s: ((q.game_end || {}).start_ms ?? 150000) / 1000,
+      },
+      arm_s: ((sc.auto || {}).arm_delay_ms ?? 4000) / 1000,
+    };
+  }
+
+  function draftInter(c) {
+    const iv = ((c.scenes.scenes || {}).intermission) || {};
+    const chapters = (Array.isArray(iv.chapters) && iv.chapters.length ? iv.chapters : [{ start: 0 }])
+      .map(ch => ({ txt: fmtClock(Number(ch.start) || 0) }));
+    return {
+      video: iv.video || "", loop: iv.loop !== false, muted: !!iv.muted,
+      resume_mode: iv.resume_mode || "chapter",
+      rewind_s: (iv.rewind_ms ?? 5000) / 1000,
+      chapters,
+    };
+  }
+
+  function draftMatch(c) {
+    const man = (c.players || {}).manual || {};
+    const side = (s) => {
+      const p = man[s] || {};
+      return { name: p.name || "", title: p.title || "", rating: p.rating == null ? "" : String(p.rating), record: p.record || "" };
+    };
+    return { white: side("white"), black: side("black") };
+  }
+
+  function draftSponsors(c) {
+    return {
+      list: (c.sponsors.sponsors || []).map(s => ({
+        name: s.name || "", tier: TIERS.includes(s.tier) ? s.tier : "regular",
+        image: s.image || "", message: s.message || "", header: s.header || "",
+        active: s.active !== false,
+      })),
+    };
+  }
+
+  function draftZones(c) {
+    const z = c.zones || {};
+    const cols = {};
+    for (const col of COLS) cols[col] = { split: !!(((z.columns || {})[col]) || {}).split };
+    const slots = {};
+    for (const id of SLOT_IDS) {
+      const s = (z.slots || {})[id] || {};
+      slots[id] = {
+        active: !!s.active,
+        // one select drives the content assignment: a sponsor tier, the
+        // advertise-here invite (sponsors + no tier), or a data block
+        srcSel: s.source === "data" ? "data" : (TIERS.includes(s.tier) ? "tier:" + s.tier : "advertise"),
+        rotate_s: (Number(s.rotate_ms) || 8000) / 1000,
+        show: ["image", "message", "both"].includes(s.show) ? s.show : "both",
+        data_kind: KINDS.includes(s.data_kind) ? s.data_kind : "results",
+        data_mode: ["auto", "manual", "hidden"].includes(s.data_mode) ? s.data_mode : "manual",
+        data_title: s.data_title || "",
+        lines: (Array.isArray(s.data_lines) ? s.data_lines : []).join("\n"),
+      };
+    }
+    return { cols, slots };
+  }
+
+  function draftFunder(c) {
+    const f = (c.zones || {}).funder || {};
+    return { enabled: f.enabled !== false, text: f.text || "", logo: f.logo || "" };
+  }
+
+  function draftRoster(c) {
+    return {
+      mode: ["photos_and_avatars", "photos_only", "no_photos"].includes(c.players.global_photo_mode)
+        ? c.players.global_photo_mode : "photos_and_avatars",
+      list: (c.players.roster || []).map(p => ({
+        name: p.name || "", photo: p.photo || "", use_photo: p.use_photo !== false,
+        rating: p.rating == null ? "" : String(p.rating), record: p.record || "",
+      })),
+    };
+  }
+
+  const DRAFTERS = {
+    event: draftEvent, board: draftBoard, trans: draftTrans, inter: draftInter, match: draftMatch,
+    sponsors: draftSponsors, zones: draftZones, funder: draftFunder, roster: draftRoster,
+  };
+
+  /* ------------------------------------------------------------ state */
+
+  const state = reactive({
+    cfg: null,            // merged config (live, from poll)
+    st: null,             // display heartbeat payload
+    stAge: null,
+    apiOk: false,
+    now: Date.now(),
+    tab: "live",
+    saving: false,
+    videos: [],
+    assets: { sponsors: [], players: [] },
+  });
+  const drafts = reactive({ event: null, board: null, trans: null, inter: null, match: null,
+    sponsors: null, zones: null, funder: null, roster: null, result: "" });
+  const baselines = reactive({ event: "", board: "", trans: "", inter: "", match: "",
+    sponsors: "", zones: "", funder: "", roster: "" });
+  const errs = reactive({ event: "", board: "", trans: "", inter: "" });
+  const toasts = reactive([]);
+  let toastId = 0;
+
+  function toast(msg, kind) {
+    const id = ++toastId;
+    toasts.push({ id, msg, kind: kind || "ok" });
+    setTimeout(() => { const i = toasts.findIndex(t => t.id === id); if (i >= 0) toasts.splice(i, 1); }, 3800);
+  }
+
+  function rebuildDraft(tab, force) {
+    if (!state.cfg) return;
+    const fresh = DRAFTERS[tab](state.cfg);
+    if (force || !drafts[tab] || jeq(drafts[tab], JSON.parse(baselines[tab] || "null"))) {
+      drafts[tab] = fresh;
+      baselines[tab] = JSON.stringify(fresh);
+    }
+  }
+  const ALL_TABS = Object.keys(DRAFTERS);
+
+  /* ------------------------------------------------------------ polling */
+
+  async function poll() {
+    try {
+      const [cj, sj] = await Promise.all([getJSON("/api/config"), getJSON("/api/status")]);
+      state.cfg = cj.config;
+      state.st = sj.status;
+      state.stAge = sj.age_ms;
+      state.apiOk = true;
+      for (const t of ALL_TABS) rebuildDraft(t, false);
+      if (!drafts.result) drafts.result = "";
+    } catch (e) {
+      state.apiOk = false;
+      state.st = null;
+    }
+    setTimeout(poll, 800);
+  }
+  setInterval(() => { state.now = Date.now(); }, 250);
+
+  async function loadVideos(announce) {
+    try {
+      const j = await getJSON("/api/assets/video");
+      state.videos = j.files || [];
+      if (announce) toast("assets/video rescanned — " + state.videos.length + " file(s) found");
+    } catch (e) {
+      if (announce) toast("Could not list assets/video", "err");
+    }
+  }
+
+  async function loadAssets(kind, announce) {
+    try {
+      const j = await getJSON("/api/assets/" + kind);
+      state.assets[kind] = j.files || [];
+      if (announce) toast("assets/" + kind + " rescanned — " + state.assets[kind].length + " file(s) found");
+    } catch (e) {
+      if (announce) toast("Could not list assets/" + kind, "err");
+    }
+  }
+
+  function pickUpload(kind) {
+    document.getElementById(kind === "sponsors" ? "upSponsors" : "upPlayers").click();
+  }
+
+  async function onUpload(kind, ev) {
+    const f = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!f) return;
+    try {
+      const data = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result).split(",")[1] || "");
+        r.onerror = () => rej(new Error("could not read the file"));
+        r.readAsDataURL(f);
+      });
+      const r = await fetch("/api/asset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, filename: f.name, data }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || "upload failed");
+      toast("Uploaded " + j.name + " — pick it in a row below");
+      loadAssets(kind, false);
+    } catch (e) { toast("Upload failed — " + e.message, "err"); }
+  }
+
+  /* --------------------------------------------------- scene commands
+     Read-modify-write scenes.json; runtime keys come off disk fresh, so a
+     command never resurrects a stale sequence or pending action. */
+
+  async function mutateScenes(fn, okMsg) {
+    try {
+      const c = await freshConfig();
+      fn(c.scenes, c);
+      await postConfig("scenes", c.scenes);
+      state.cfg = c;                     // snappy UI; poll reconciles anyway
+      if (okMsg) toast(okMsg);
+    } catch (e) {
+      toast("Scene command failed — " + e.message, "err");
+    }
+  }
+
+  // Same phase maths as scenes.js effectiveScene(), for Stop-here and the readout.
+  function effScene(sc, now) {
+    const seq = sc.sequence;
+    if (seq && seq.name && seq.started_at) {
+      const el = now - seq.started_at;
+      const t = (sc.sequences || {})[seq.name] || {};
+      if (seq.name === "game_start") return el < (t.versus_ms ?? 8000) ? "versus" : "game";
+      if (seq.name === "game_end") {
+        const p = t.postgame_ms ?? 40000, s = t.start_ms ?? 150000;
+        return el < p ? "postgame" : el < p + s ? "start" : "intermission";
+      }
+    }
+    return SCENES.includes(sc.active) ? sc.active : "game";
+  }
+
+  const setScene = (s) => mutateScenes(sc => { sc.active = s; sc.sequence = null; sc.pending_auto = null; });
+  const startSeq = (name) => mutateScenes(sc => { sc.sequence = { name, started_at: Date.now() }; sc.pending_auto = null; },
+    name === "game_start" ? "Game start sequence running" : "Game end sequence running");
+  const stopSeq = () => mutateScenes(sc => { sc.active = effScene(sc, Date.now()); sc.sequence = null; }, "Sequence stopped — holding current scene");
+  const cancelPending = () => mutateScenes(sc => { sc.pending_auto = null; }, "Pending auto transition cancelled");
+  const setAuto = (on) => mutateScenes(sc => { sc.auto = Object.assign({}, sc.auto, { enabled: !!on }); },
+    on ? "Automatic transitions ON (arm delay applies)" : "Automatic transitions OFF");
+  const saveResult = (text) => {
+    drafts.result = text;
+    return mutateScenes(sc => {
+      sc.scenes = sc.scenes || {};
+      sc.scenes.postgame = Object.assign({}, sc.scenes.postgame, { result_text: String(text || "").trim() });
+    }, text ? "Postgame result set: " + text : "Postgame result cleared");
+  };
+
+  // Game-scene bottom strip: a scenes.json key, but operationally a zone
+  // switch — instant toggle like demo mode.
+  const setStrip = (on) => mutateScenes(sc => {
+    sc.scenes = sc.scenes || {};
+    sc.scenes.game = Object.assign({}, sc.scenes.game, { bottom_strip: !!on });
+  }, on ? "Bottom strip ON — game-scene zones relocate into the strip"
+        : "Bottom strip OFF — game scene renders exactly as today");
+
+  async function setDemo(on) {
+    try {
+      const c = await freshConfig();
+      c.board.demo_mode = !!on;
+      await postConfig("board", c.board);
+      state.cfg = c;
+      toast(on ? "DEMO MODE ON — fake players on the display" : "Demo mode off — live board state");
+    } catch (e) { toast("Demo toggle failed — " + e.message, "err"); }
+  }
+
+  /* --------------------------------------------------------- tab saves */
+
+  async function saveGuard(fn) {
+    state.saving = true;
+    try { await fn(); } finally { state.saving = false; }
+  }
+
+  async function saveEvent() {
+    errs.event = "";
+    const d = drafts.event;
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        const g = c.general;
+        Object.assign(g, {
+          event_title: d.event_title.trim(), season: d.season.trim(), round: d.round.trim(),
+          time_control: d.time_control.trim(), location: d.location.trim(),
+          table_name: d.table_name.trim(), table_number: toNum(d.table_number, 1, 1),
+          website: d.website.trim(),
+          running_time_start: d.running_time_start, running_time_end: d.running_time_end,
+          feature_match_time: d.feature_match_time,
+          social_links: d.social_links.filter(s => (s.label || "").trim() || (s.url || "").trim())
+            .map(s => ({ label: (s.label || "").trim(), url: (s.url || "").trim() })),
+          config_poll_ms: toNum(d.config_poll_ms, 500, 150),
+          next_broadcast: Object.assign({}, g.next_broadcast, {
+            mode: ["auto", "manual", "hidden"].includes(d.nb_mode) ? d.nb_mode : "auto",
+            label: d.nb_label.trim() || "Next broadcast",
+            manual_date: d.nb_date.trim(), manual_time: d.nb_time.trim(),
+            recurrence_days: toNum(d.nb_days, 7, 1),
+          }),
+        });
+        await postConfig("general", g);
+        state.cfg = c; rebuildDraft("event", true);
+        toast("Event settings saved — live within ~½s");
+      } catch (e) { errs.event = e.message; }
+    });
+  }
+
+  async function saveBoard() {
+    errs.board = "";
+    const d = drafts.board;
+    if (d.manual_host_override && !String(d.manual_host).trim()) {
+      errs.board = "Override is on but no host is set — enter a host or turn the override off.";
+      return;
+    }
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        Object.assign(c.board, {
+          serialnr: String(d.serialnr).trim(),
+          port: toNum(d.port, 1982, 1, 65535),
+          poll_ms: toNum(d.poll_ms, 800, 200),
+          manual_host_override: !!d.manual_host_override,
+          manual_host: String(d.manual_host).trim(),
+          move_times: !!d.move_times,
+          pgn: Object.assign({}, c.board.pgn, {
+            enabled: !!d.pgn_enabled,
+            url: String(d.pgn_url).trim(),
+            poll_ms: Math.round(toNum(d.pgn_poll_s, 6, 2) * 1000),
+          }),
+          // host and demo_mode deliberately untouched: host stays 127.0.0.1
+          // per the single-machine venue; demo is the Live-tab switch.
+        });
+        await postConfig("board", c.board);
+        state.cfg = c; rebuildDraft("board", true);
+        toast("Board settings saved");
+      } catch (e) { errs.board = e.message; }
+    });
+  }
+
+  async function saveTrans() {
+    errs.trans = "";
+    const d = drafts.trans;
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        const sc = c.scenes;
+        sc.default_transition = {
+          type: TTYPES.includes(d.def.type) ? d.def.type : "fade",
+          duration_ms: toNum(d.def.duration_ms, 1000, 0),
+          delay_ms: toNum(d.def.delay_ms, 0, 0),
+          direction: DIRS.includes(d.def.direction) ? d.def.direction : "left",
+        };
+        const types = { cut: {} };
+        for (const t of TTYPES) {
+          if (t === "cut") continue;
+          const src = d.types[t], out = {};
+          if (src.duration_ms !== "") out.duration_ms = toNum(src.duration_ms, undefined, 0);
+          if (src.delay_ms !== "") out.delay_ms = toNum(src.delay_ms, undefined, 0);
+          if ((t === "slide" || t === "wipe") && src.direction) out.direction = src.direction;
+          types[t] = out;
+        }
+        sc.transitions = types;
+        sc.scenes = sc.scenes || {};
+        for (const s of SCENES) {
+          const ps = d.perScene[s];
+          const cur = sc.scenes[s] || {};
+          if (!ps.mode) cur.transition = null;
+          else {
+            const ov = { type: ps.mode };
+            if (ps.mode !== "cut") {
+              if (ps.duration_ms !== "") ov.duration_ms = toNum(ps.duration_ms, undefined, 0);
+              if (ps.delay_ms !== "") ov.delay_ms = toNum(ps.delay_ms, undefined, 0);
+              if ((ps.mode === "slide" || ps.mode === "wipe") && ps.direction) ov.direction = ps.direction;
+            }
+            cur.transition = ov;
+          }
+          sc.scenes[s] = cur;
+        }
+        sc.sequences = {
+          game_start: { versus_ms: Math.round(toNum(d.seq.versus_s, 8, 1) * 1000) },
+          game_end: {
+            postgame_ms: Math.round(toNum(d.seq.postgame_s, 40, 1) * 1000),
+            start_ms: Math.round(toNum(d.seq.start_s, 150, 1) * 1000),
+          },
+        };
+        sc.auto = Object.assign({}, sc.auto, { arm_delay_ms: Math.round(toNum(d.arm_s, 4, 1) * 1000) });
+        await postConfig("scenes", sc);
+        state.cfg = c; rebuildDraft("trans", true);
+        toast("Transitions saved");
+      } catch (e) { errs.trans = e.message; }
+    });
+  }
+
+  async function saveInter() {
+    errs.inter = "";
+    const d = drafts.inter;
+    const secs = [];
+    for (const ch of d.chapters) {
+      if (String(ch.txt).trim() === "") continue;
+      const s = parseClock(ch.txt);
+      if (Number.isNaN(s)) { errs.inter = `Chapter time “${ch.txt}” is not a valid time (use seconds, m:ss or h:mm:ss).`; return; }
+      secs.push(s);
+    }
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        const sc = c.scenes;
+        sc.scenes = sc.scenes || {};
+        const uniq = [...new Set(secs)].sort((a, b) => a - b);
+        sc.scenes.intermission = Object.assign({}, sc.scenes.intermission, {
+          video: d.video || "",
+          loop: !!d.loop, muted: !!d.muted,
+          resume_mode: ["chapter", "exact", "rewind", "restart"].includes(d.resume_mode) ? d.resume_mode : "chapter",
+          rewind_ms: Math.round(toNum(d.rewind_s, 5, 1) * 1000),
+          chapters: (uniq.length ? uniq : [0]).map(s => ({ start: s })),
+        });
+        await postConfig("scenes", sc);
+        state.cfg = c; rebuildDraft("inter", true);
+        toast("Intermission saved");
+      } catch (e) { errs.inter = e.message; }
+    });
+  }
+
+  async function saveMatch() {
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        c.players.manual = c.players.manual || {};
+        for (const side of ["white", "black"]) {
+          const d = drafts.match[side];
+          const rating = String(d.rating).trim();
+          c.players.manual[side] = Object.assign({}, c.players.manual[side], {
+            name: d.name.trim(), title: d.title.trim(),
+            rating: rating === "" ? null : (/^\d+$/.test(rating) ? Number(rating) : rating),
+            record: d.record.trim(),
+            // photo preserved untouched — arrives with the players stage
+          });
+        }
+        await postConfig("players", c.players);
+        state.cfg = c; rebuildDraft("match", true);
+        toast("Players saved");
+      } catch (e) { toast("Players save failed — " + e.message, "err"); }
+    });
+  }
+
+  async function saveSponsors() {
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        c.sponsors.sponsors = drafts.sponsors.list
+          .filter(s => (s.name || "").trim() || s.image)
+          .map(s => ({
+            name: (s.name || "").trim(), tier: TIERS.includes(s.tier) ? s.tier : "regular",
+            image: s.image || "", message: (s.message || "").trim(), header: (s.header || "").trim(),
+            active: !!s.active,
+          }));
+        await postConfig("sponsors", c.sponsors);
+        state.cfg = c; rebuildDraft("sponsors", true);
+        toast("Sponsors saved");
+      } catch (e) { toast("Sponsors save failed — " + e.message, "err"); }
+    });
+  }
+
+  async function saveZones() {
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        const d = drafts.zones;
+        c.zones.columns = {};
+        for (const col of COLS) c.zones.columns[col] = { split: !!d.cols[col].split };
+        c.zones.slots = c.zones.slots || {};
+        for (const id of SLOT_IDS) {
+          const s = d.slots[id];
+          c.zones.slots[id] = Object.assign({}, c.zones.slots[id], {
+            active: !!s.active,
+            source: s.srcSel === "data" ? "data" : "sponsors",
+            tier: String(s.srcSel).startsWith("tier:") ? s.srcSel.slice(5) : "",
+            rotate_ms: Math.round(toNum(s.rotate_s, 8, 2) * 1000),
+            show: ["image", "message", "both"].includes(s.show) ? s.show : "both",
+            data_kind: KINDS.includes(s.data_kind) ? s.data_kind : "results",
+            data_mode: ["auto", "manual", "hidden"].includes(s.data_mode) ? s.data_mode : "manual",
+            data_title: String(s.data_title || "").trim(),
+            data_lines: String(s.lines || "").split("\n").map(l => l.trim()).filter(Boolean),
+          });
+        }
+        await postConfig("zones", c.zones);          // funder rides through fresh, untouched
+        state.cfg = c; rebuildDraft("zones", true);
+        toast("Zones saved");
+      } catch (e) { toast("Zones save failed — " + e.message, "err"); }
+    });
+  }
+
+  async function saveFunder() {
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        const d = drafts.funder;
+        c.zones.funder = Object.assign({}, c.zones.funder, {
+          enabled: !!d.enabled, text: String(d.text || "").trim(), logo: String(d.logo || "").trim(),
+        });
+        await postConfig("zones", c.zones);          // columns/slots ride through fresh
+        state.cfg = c; rebuildDraft("funder", true);
+        toast("Funder credit saved");
+      } catch (e) { toast("Funder save failed — " + e.message, "err"); }
+    });
+  }
+
+  async function saveRoster() {
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        const d = drafts.roster;
+        c.players.global_photo_mode = ["photos_and_avatars", "photos_only", "no_photos"].includes(d.mode)
+          ? d.mode : "photos_and_avatars";
+        c.players.roster = d.list
+          .filter(p => (p.name || "").trim())
+          .map(p => {
+            const rating = String(p.rating || "").trim();
+            return {
+              name: p.name.trim(), photo: p.photo || "", use_photo: !!p.use_photo,
+              rating: rating === "" ? null : (/^\d+$/.test(rating) ? Number(rating) : rating),
+              record: (p.record || "").trim(),
+            };
+          });
+        await postConfig("players", c.players);      // manual white/black preserved from fresh
+        state.cfg = c; rebuildDraft("roster", true);
+        toast("Roster & photo policy saved");
+      } catch (e) { toast("Roster save failed — " + e.message, "err"); }
+    });
+  }
+
+  // Copy a roster player into the manual match fields (Live tab). This is an
+  // explicit overwrite of that side, photo included when photo use is on;
+  // the title clears because the roster record carries none.
+  async function assignSide(side, p) {
+    try {
+      const c = await freshConfig();
+      const rating = String(p.rating || "").trim();
+      c.players.manual = c.players.manual || {};
+      c.players.manual[side] = Object.assign({}, c.players.manual[side], {
+        name: (p.name || "").trim(), title: "",
+        rating: rating === "" ? null : (/^\d+$/.test(rating) ? Number(rating) : rating),
+        record: (p.record || "").trim(),
+        photo: (p.use_photo && p.photo) ? "/assets/players/" + encodeURIComponent(p.photo) : "",
+      });
+      await postConfig("players", c.players);
+      state.cfg = c; rebuildDraft("match", true);
+      toast((p.name || "Player") + " → " + (side === "white" ? "White" : "Black"));
+    } catch (e) { toast("Assign failed — " + e.message, "err"); }
+  }
+
+  /* ------------------------------------------------------------- app */
+
+  createApp({
+    setup() {
+      const cfg = computed(() => state.cfg);
+      const st = computed(() => state.st);
+      const beatOk = computed(() => !!(state.st && state.stAge != null && state.stAge < 4000));
+      const pendingAuto = computed(() => (state.cfg && state.cfg.scenes.pending_auto) || null);
+      const autoEnabled = computed(() => !!(state.cfg && state.cfg.scenes.auto && state.cfg.scenes.auto.enabled));
+      const seqCfg = computed(() => {
+        const q = (state.cfg && state.cfg.scenes.sequences) || {};
+        return {
+          game_start: { versus_ms: (q.game_start || {}).versus_ms ?? 8000 },
+          game_end: { postgame_ms: (q.game_end || {}).postgame_ms ?? 40000, start_ms: (q.game_end || {}).start_ms ?? 150000 },
+        };
+      });
+
+      // Live sequence readout: current phase + countdown + what comes next.
+      const seqInfo = computed(() => {
+        const sc = state.cfg && state.cfg.scenes;
+        if (!sc || !sc.sequence || !sc.sequence.started_at) return null;
+        const el = state.now - sc.sequence.started_at;
+        const q = seqCfg.value;
+        if (sc.sequence.name === "game_start") {
+          const v = q.game_start.versus_ms;
+          return {
+            name: "game start",
+            text: el < v ? `versus — ${fmtCountdown(v - el)} left → game` : "handing over to game…",
+          };
+        }
+        const p = q.game_end.postgame_ms, s = q.game_end.start_ms;
+        let text;
+        if (el < p) text = `postgame — ${fmtCountdown(p - el)} left → start → intermission`;
+        else if (el < p + s) text = `start — ${fmtCountdown(p + s - el)} left → intermission`;
+        else text = "handing over to intermission…";
+        return { name: "game end", text };
+      });
+
+      const pgnStatusLabel = computed(() => {
+        if (!beatOk.value) return "no display connected";
+        const p = state.st && state.st.pgn;
+        if (!p) return "—";
+        return {
+          off: "probing off",
+          absent: "no PGN source found — times come from observed clocks (normal when LiveChess serves no PGN)",
+          waiting: "source found — waiting for moves to match against",
+          agree: "matched — per-move times from the PGN clocks",
+          ambiguous: "several games match the observed moves — holding observed times until they separate",
+          diverged: "PGN disagrees with the observed game — the observed game stays on air (quiet dot on the moves panel)",
+          stale: "PGN source lost — last agreed times held",
+        }[p.status] || p.status;
+      });
+
+      const effectiveHostLabel = computed(() => {
+        const b = drafts.board;
+        if (!b) return "—";
+        if (b.manual_host_override && String(b.manual_host).trim()) {
+          const h = String(b.manual_host).trim();
+          return h.includes(":") ? h : h + ":" + toNum(b.port, 1982, 1, 65535);
+        }
+        return "127.0.0.1:" + toNum(b.port, 1982, 1, 65535) + " (this machine)";
+      });
+
+      const dirty = computed(() => {
+        const out = {};
+        for (const t of ALL_TABS) out[t] = !!drafts[t] && !jeq(drafts[t], JSON.parse(baselines[t] || "null"));
+        return out;
+      });
+      const diskChanged = computed(() => {
+        const out = {};
+        for (const t of ALL_TABS) {
+          out[t] = !!(state.cfg && dirty.value[t] && !jeq(DRAFTERS[t](state.cfg), JSON.parse(baselines[t] || "null")));
+        }
+        return out;
+      });
+      const tabDirty = (id) => {
+        if (id === "live") return dirty.value.match;
+        if (id === "event") return dirty.value.event;
+        if (id === "board") return dirty.value.board;
+        if (id === "transitions") return dirty.value.trans;
+        if (id === "intermission") return dirty.value.inter;
+        if (id === "zones") return dirty.value.sponsors || dirty.value.zones || dirty.value.funder;
+        if (id === "players") return dirty.value.roster;
+        return false;
+      };
+
+      /* ---- zones tab: per-scene availability context ---- */
+      const zoneScene = ref("game");
+      const stripOn = computed(() =>
+        !!(state.cfg && (((state.cfg.scenes.scenes || {}).game) || {}).bottom_strip));
+      // A column is dimmed when the selected scene's geometry can't render it:
+      // intermission is full-bleed video (no zones at all); the game scene
+      // only provides the right column until the strip relocates all three.
+      const colDimmed = (col) => {
+        if (zoneScene.value === "intermission") return true;
+        if (zoneScene.value === "game") return !stripOn.value && col !== "right";
+        return false;
+      };
+      const colSlotIds = (col) =>
+        drafts.zones && drafts.zones.cols[col].split ? [col + "_top", col + "_bottom"] : [col];
+      const slotLabel = (id) => id.replace("_", " — ");
+      const activeSlotCount = computed(() => {
+        if (!drafts.zones) return 0;
+        let n = 0;
+        for (const col of COLS) for (const id of colSlotIds(col)) if (drafts.zones.slots[id].active) n++;
+        return n;
+      });
+      const revert = (t) => { rebuildDraft(t, true); if (errs[t] !== undefined) errs[t] = ""; };
+
+      const configuredVideoMissing = computed(() =>
+        !!(drafts.inter && drafts.inter.video && !state.videos.some(v => v.name === drafts.inter.video)));
+
+      const chapterPreview = (txt) => {
+        if (String(txt).trim() === "") return "empty — ignored";
+        const s = parseClock(txt);
+        return Number.isNaN(s) ? "✕ not a valid time" : "= " + fmtClock(s) + " (" + Math.round(s) + "s)";
+      };
+
+      function fmtCountdown(ms) {
+        const s = Math.max(0, ms) / 1000;
+        if (s >= 90) return Math.floor(s / 60) + "m " + Math.round(s % 60) + "s";
+        return (s >= 10 ? Math.round(s) : s.toFixed(1)) + "s";
+      }
+      const fmtBytes = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.ceil(n / 1024) + " KB";
+
+      function switchTab(id) {
+        state.tab = id;
+        if (id === "intermission") loadVideos(false);
+        if (id === "zones") loadAssets("sponsors", false);
+        if (id === "players") loadAssets("players", false);
+      }
+
+      loadVideos(false);
+      poll();
+
+      return {
+        SCENES, TTYPES, DIRS, TIERS, COLS, tabs: TABS,
+        cfg, st, beatOk, pendingAuto, autoEnabled, seqCfg, seqInfo, effectiveHostLabel, pgnStatusLabel,
+        apiOk: computed(() => state.apiOk),
+        now: computed(() => state.now),
+        tab: computed(() => state.tab),
+        saving: computed(() => state.saving),
+        videos: computed(() => state.videos),
+        assets: computed(() => state.assets),
+        drafts, errs, toasts, dirty, diskChanged, tabDirty,
+        switchTab, revert, fmtCountdown, fmtBytes, chapterPreview, configuredVideoMissing,
+        setScene, startSeq, stopSeq, cancelPending, setAuto, setDemo, saveResult,
+        saveEvent, saveBoard, saveTrans, saveInter, saveMatch, loadVideos,
+        zoneScene, stripOn, colDimmed, colSlotIds, slotLabel, activeSlotCount,
+        setStrip, saveSponsors, saveZones, saveFunder, saveRoster, assignSide,
+        pickUpload, onUpload, loadAssets,
+      };
+    },
+  }).mount("#app");
 })();
 </script>
 </body>

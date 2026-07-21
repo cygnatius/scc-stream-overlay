@@ -8,10 +8,13 @@
 /* ==========================================================================
    SHEPPARTON CHESS CLUB — LIVE STREAM OVERLAY (display page)
    OBS Browser Source: 1920 x 1080. Theme matched to sheppartonchess.club.
-   Served by server.js; all live values come from the reactive config store
-   (public/js/config.js) and the LiveChess feed (public/js/livechess.js).
-   The CSS below is carried over from scc-stream-overlay.html unchanged apart
-   from: local fonts, local crest, and the tiny config-warning dot.
+
+   Six permanently-mounted scene layers inside .stage; scenes.js decides
+   which are visible and how they transition. The GAME layer carries the
+   original overlay markup and CSS unchanged — its grid/padding/background
+   moved verbatim from the old .stage rules onto .sc-game, so it renders
+   pixel-identically. Other scenes use their own prefixed classes (sh-, vs-,
+   pg-, iv-, ed-) so nothing bleeds into the preserved game selectors.
    ========================================================================== */
 :root{
   --bg:#2E2028;          /* club body aubergine */
@@ -32,21 +35,24 @@
   --hi:rgba(217,161,59,.55); /* last-move highlight */
 }
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);
+/* The page itself is transparent: every scene layer paints its own opaque
+   background over the full canvas, so at 1920x1080 in OBS nothing changes —
+   but the game scene's backdrop is owned by the scene, not the page. */
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;
   display:flex;align-items:center;justify-content:center;
   font-family:'Figtree',system-ui,sans-serif;color:var(--cream);
   -webkit-font-smoothing:antialiased}
 #app{display:contents}
-/* faint vintage vignette to echo the site hero */
-.stage::before{content:"";position:absolute;inset:0;pointer-events:none;
-  background:radial-gradient(120% 90% at 30% 0%,rgba(0,0,0,0) 40%,rgba(0,0,0,.45) 100%);
-  z-index:50}
 
 .stage{position:relative;width:1920px;height:1080px;flex:none;
-  transform-origin:center center;background:var(--bg);display:grid;
-  grid-template-rows:84px 1fr 56px;
-  grid-template-columns:1fr;
-  padding:20px 34px;gap:16px}
+  transform-origin:center center;overflow:hidden}
+
+/* every scene is a full-canvas layer; scenes.js drives visibility inline */
+.scene{position:absolute;inset:0;overflow:hidden}
+
+/* fade-through-black curtain (the classic broadcast fade) */
+.curtain{position:absolute;inset:0;background:#000;opacity:0;z-index:70;
+  pointer-events:none;transition:opacity 500ms linear}
 
 /* ---------- angled parchment banner (site signature element) ---------- */
 .banner{position:relative;display:inline-flex;align-items:center;
@@ -59,6 +65,19 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);
 .banner.sm{font-size:16px;padding:6px 26px 8px 16px}
 .banner::after{content:"";position:absolute;left:0;bottom:-4px;height:4px;
   width:100%;background:var(--gold)}
+
+/* ==========================================================================
+   GAME SCENE — the original overlay, preserved. The layout rules that used
+   to live on .stage moved here unchanged; everything below is verbatim.
+   ========================================================================== */
+.sc-game{display:grid;background:var(--bg);
+  grid-template-rows:84px 1fr 56px;
+  grid-template-columns:1fr;
+  padding:20px 34px;gap:16px}
+/* faint vintage vignette to echo the site hero */
+.sc-game::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(120% 90% at 30% 0%,rgba(0,0,0,0) 40%,rgba(0,0,0,.45) 100%);
+  z-index:50}
 
 /* ===================== HEADER ===================== */
 header{grid-row:1;display:flex;align-items:center;justify-content:space-between}
@@ -203,98 +222,374 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 /* ---- subtle connection warning (config poll failing) ------------------- */
 /* Deliberately quiet: a dim gold dot, no red, no icons, no text on stream.   */
 .cfgwarn{position:absolute;left:10px;bottom:10px;width:8px;height:8px;
-  border-radius:50%;background:var(--gold);opacity:.28;z-index:60}
+  border-radius:50%;background:var(--gold);opacity:.28;z-index:80}
+
+/* ==========================================================================
+   SCENE SHELLS — start / versus / postgame / intermission / ending.
+   Own class prefixes; nothing here touches the preserved game selectors.
+   ========================================================================== */
+
+/* ---------- START — pre-broadcast card ---------- */
+.sc-start{background:var(--bg);display:grid;place-items:center}
+.sc-start::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(90% 70% at 50% 20%,rgba(217,161,59,.10) 0%,rgba(0,0,0,0) 55%),
+             radial-gradient(120% 90% at 30% 0%,rgba(0,0,0,0) 40%,rgba(0,0,0,.45) 100%)}
+.sh-wrap{position:relative;display:flex;flex-direction:column;align-items:center;gap:26px;text-align:center}
+.sh-crest{height:150px;border-radius:14px;background:var(--cream);padding:12px 20px;
+  box-shadow:0 14px 34px rgba(0,0,0,.5)}
+.sh-crest img{height:100%;width:auto;object-fit:contain;display:block}
+.sh-club{font-family:var(--word);font-weight:700;font-size:54px;letter-spacing:.12em;
+  text-transform:uppercase;line-height:1.1}
+.sh-banner{font-size:30px;margin-top:6px}
+.sh-event{font-family:var(--display);font-weight:800;font-size:40px;margin-top:16px}
+.sh-season{font-family:var(--word);font-weight:600;font-size:20px;color:var(--gold);
+  letter-spacing:.2em;text-transform:uppercase}
+.sh-line{font-family:'Figtree',sans-serif;font-weight:600;font-size:26px;color:var(--cream-dim)}
+.sh-line b{color:var(--cream);font-weight:800}
+.sh-feature{color:var(--gold)}
+.sh-site{font-family:var(--word);font-weight:700;font-size:22px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--gold);margin-top:20px}
+
+/* ---------- VERSUS / POSTGAME — hero screens ---------- */
+.sc-versus,.sc-postgame{background:var(--bg);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:44px}
+.sc-versus::before,.sc-postgame::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(70% 55% at 50% 45%,rgba(217,161,59,.12) 0%,rgba(0,0,0,0) 60%),
+             radial-gradient(120% 90% at 30% 0%,rgba(0,0,0,0) 40%,rgba(0,0,0,.5) 100%)}
+.vs-brand{position:absolute;top:34px;left:0;right:0;display:flex;align-items:center;
+  justify-content:center;gap:16px;font-family:var(--word);font-weight:700;font-size:24px;
+  letter-spacing:.14em;text-transform:uppercase}
+.vs-brand img{height:52px;background:var(--cream);border-radius:8px;padding:4px 8px}
+.vs-row{position:relative;display:grid;grid-template-columns:640px 260px 640px;
+  align-items:center;justify-items:center}
+.vs-player{display:flex;flex-direction:column;align-items:center;gap:18px;text-align:center}
+.vs-avatar{width:230px;height:230px;border-radius:18px;background:var(--panel-2);
+  border:4px solid var(--cream);box-shadow:0 18px 40px rgba(0,0,0,.55);overflow:hidden;
+  display:grid;place-items:center;font-family:var(--display);font-weight:800;
+  font-size:84px;color:var(--cream-dim)}
+.vs-avatar img{width:100%;height:100%;object-fit:cover}
+.vs-tag{font-family:var(--word);font-weight:700;font-size:18px;letter-spacing:.22em;
+  text-transform:uppercase;color:var(--bg);background:var(--cream);padding:4px 18px;border-radius:4px}
+.vs-name{font-family:var(--display);font-weight:800;font-size:52px;line-height:1.05;
+  display:flex;align-items:center;gap:14px;max-width:620px}
+.vs-name .ptitle{font-size:20px;padding:4px 10px}
+.vs-meta{font-family:'Figtree',sans-serif;font-weight:600;font-size:24px;color:var(--cream-dim)}
+.vs-meta b{color:var(--cream);font-weight:800}
+.vs-meta .rec{color:var(--gold);font-weight:800}
+.vs-mid{display:flex;flex-direction:column;align-items:center;gap:18px}
+.vs-vs{font-family:var(--display);font-weight:900;font-size:110px;color:var(--gold);
+  text-shadow:0 8px 26px rgba(0,0,0,.6);line-height:1}
+.vs-foot{font-family:var(--word);font-weight:600;font-size:24px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--cream-dim)}
+.vs-foot b{color:var(--gold);font-weight:700}
+.pg-result{font-family:var(--display);font-weight:900;font-size:96px;color:var(--cream);
+  line-height:1;text-shadow:0 8px 26px rgba(0,0,0,.6);font-variant-numeric:tabular-nums}
+
+/* ---------- INTERMISSION — full-bleed video ---------- */
+.sc-intermission{background:#000;display:grid;place-items:center}
+.iv-video{max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain;display:block}
+.iv-mark{position:absolute;right:28px;bottom:20px;font-family:var(--word);font-weight:700;
+  font-size:18px;letter-spacing:.14em;text-transform:uppercase;color:var(--cream);opacity:.4}
+.iv-empty{position:absolute;inset:0;display:grid;place-items:center;background:var(--bg)}
+.iv-empty .sh-wrap{gap:18px}
+
+/* ---------- ENDING — sign-off card ---------- */
+.sc-ending{background:var(--bg);display:grid;place-items:center}
+.sc-ending::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(90% 70% at 50% 25%,rgba(217,161,59,.10) 0%,rgba(0,0,0,0) 55%),
+             radial-gradient(120% 90% at 30% 0%,rgba(0,0,0,0) 40%,rgba(0,0,0,.45) 100%)}
+.ed-next{margin-top:12px;background:var(--panel);border:1px solid rgba(241,231,211,.14);
+  border-radius:14px;padding:26px 44px;display:flex;flex-direction:column;align-items:center;gap:10px;
+  box-shadow:0 14px 34px rgba(0,0,0,.45)}
+.ed-next-label{font-family:var(--word);font-weight:700;font-size:18px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--gold)}
+.ed-next-when{font-family:var(--display);font-weight:800;font-size:40px}
+.ed-next-venue{font-family:'Figtree',sans-serif;font-weight:600;font-size:20px;color:var(--cream-dim)}
+
+/* ==========================================================================
+   ZONES (stage 4) — sponsor / data slot cards. Game-side cards reuse the
+   preserved .sponsors card look; every new class is z-/ad-/s- prefixed so
+   nothing bleeds into the preserved game selectors. With all slots inactive
+   none of this renders and the game scene is identical to the pre-zone
+   overlay.
+   ========================================================================== */
+.sstack{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;width:100%;height:100%;min-height:0}
+.sstack img{max-width:100%;max-height:100%;min-height:0;object-fit:contain}
+.sstack.hasmsg img{max-height:62%}
+.smsg{color:var(--ink);font-family:'Figtree',sans-serif;font-weight:600;
+  font-size:19px;line-height:1.3;text-align:center;padding:0 12px;max-width:100%}
+
+/* "advertise here" invite — active but unassigned zone; designed for stream */
+.advert{position:relative;flex:1;min-height:132px;margin:12px;border-radius:8px;
+  background:var(--cream);display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:7px;overflow:hidden;padding:14px}
+.advert::after{content:"";position:absolute;left:0;right:0;bottom:0;height:5px;background:var(--gold)}
+.ad-head{font-family:var(--display);font-weight:800;font-size:27px;color:var(--ink);line-height:1.05}
+.ad-line{font-family:'Figtree',sans-serif;font-weight:600;font-size:15px;color:#6b5d49}
+.ad-site{font-family:var(--word);font-weight:700;font-size:14px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--brick)}
+
+/* data block (leaderboards / pairings / results) */
+.zdata{flex:1;min-height:132px;margin:12px;border-radius:8px;background:var(--panel-2);
+  border:1px solid rgba(241,231,211,.10);padding:12px 18px;display:flex;
+  flex-direction:column;gap:6px;overflow:hidden;justify-content:center}
+.zrow{font-family:'Figtree',sans-serif;font-weight:600;font-size:18px;color:var(--cream);
+  font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* game bottom strip — config option, default OFF. These rules only apply
+   with the .has-strip class present, so the OFF state is untouched. */
+.sc-game.has-strip{grid-template-rows:84px 1fr 128px 56px}
+.sc-game.has-strip footer{grid-row:4}
+.zstrip{grid-row:3;display:flex;gap:16px;min-height:0}
+.zstrip .zcard{flex:1;min-width:0}
+
+/* open-scene band (start / versus / postgame / ending) */
+.zband{position:absolute;left:70px;right:70px;bottom:26px;display:flex;gap:18px;
+  justify-content:center;z-index:5}
+.zband .zcard{flex:0 1 430px;min-width:0}
+
+/* compact variant used by strip + band */
+.zcard.compact .cap{padding:7px 14px 6px}
+.zcard.compact .cap .t{font-size:13px}
+.zcard.compact .slogo{min-height:76px;margin:9px}
+.zcard.compact .slogo .item{inset:8px}
+.zcard.compact .sname{font-size:22px}
+.zcard.compact .smsg{font-size:15px}
+.zcard.compact .advert{min-height:76px;margin:9px;gap:4px;padding:10px}
+.zcard.compact .ad-head{font-size:21px}
+.zcard.compact .ad-line{font-size:13px}
+.zcard.compact .ad-site{font-size:12px}
+.zcard.compact .zdata{min-height:76px;margin:9px;padding:8px 14px;gap:3px}
+.zcard.compact .zrow{font-size:15px}
+
+/* player photo modes: when a side shows no visual at all (photos_only with
+   no photo, or no_photos) the card collapses the avatar column */
+.pcard.nophoto{grid-template-columns:1fr auto}
+
+/* per-move times (stage 5) — only cells WITH a time get the flex layout, so
+   the preserved .mv rule renders classic cells byte-identically */
+.mv.has-t{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.mv .mvt{font-size:13px;font-weight:600;color:var(--cream-dim);font-variant-numeric:tabular-nums;flex:none}
+.mv.cur .mvt{color:rgba(31,21,27,.7)}
+/* PGN divergence: deliberately quiet — a dim gold dot by the panel title.
+   No red, no icons, nothing over the board. */
+.pgndot{display:inline-block;width:7px;height:7px;border-radius:50%;
+  background:var(--gold);opacity:.35;margin-left:9px;vertical-align:middle}
 </style>
 </head>
 <body>
 <div id="app">
 <div class="stage">
 
-  <!-- ============ HEADER ============ -->
-  <header>
-    <div class="brand">
-      <div class="crest"><img src="/assets/img/crest.png" alt="Shepparton Chess Club"></div>
-      <div>
-        <h1>Shepparton Chess Club</h1>
-        <div class="sub" v-text="general.location"></div>
-      </div>
-    </div>
-    <div class="event">
-      <div class="tname" v-text="general.event_title"></div>
-      <div class="round" v-text="roundLabel"></div>
-    </div>
-  </header>
-
-  <!-- ============ MAIN ============ -->
-  <main>
-    <!-- board column: Black (top) · board · White (bottom) -->
-    <div class="boardwrap">
-      <!-- top player (Black) -->
-      <div class="pcard" :class="{active: game.toMove==='b'}">
-        <div class="avatar">
-          <img v-if="black.photo" :src="black.photo" alt="">
-          <template v-else>{{ black.initials }}</template>
+  <!-- ================= GAME (the original overlay, preserved) ============ -->
+  <section class="scene sc-game" :class="{'has-strip': gameStripZones.length}" :style="sceneStyle('game')">
+    <header>
+      <div class="brand">
+        <div class="crest"><img src="/assets/img/crest.png" alt="Shepparton Chess Club"></div>
+        <div>
+          <h1>Shepparton Chess Club</h1>
+          <div class="sub" v-text="general.location"></div>
         </div>
-        <div class="pinfo">
-          <div class="pname"><span v-text="black.name"></span><span class="ptitle" v-if="black.title" v-text="black.title"></span></div>
-          <div class="pmeta">
-            <span>Rating <b v-text="black.rating"></b></span>
-            <span>Record <span class="rec" v-text="black.record"></span></span>
+      </div>
+      <div class="event">
+        <div class="tname" v-text="general.event_title"></div>
+        <div class="round" v-text="roundLabel"></div>
+      </div>
+    </header>
+
+    <main>
+      <!-- board column: Black (top) · board · White (bottom) -->
+      <div class="boardwrap">
+        <div class="pcard" :class="{active: game.toMove==='b', nophoto: !black.showBox}">
+          <div class="avatar" v-if="black.showBox">
+            <img v-if="black.photo" :src="black.photo" alt="">
+            <template v-else>{{ black.initials }}</template>
           </div>
+          <div class="pinfo">
+            <div class="pname"><span v-text="black.name"></span><span class="ptitle" v-if="black.title" v-text="black.title"></span></div>
+            <div class="pmeta">
+              <span v-if="black.rating">Rating <b v-text="black.rating"></b></span>
+              <span v-if="black.record">Record <span class="rec" v-text="black.record"></span></span>
+            </div>
+          </div>
+          <div class="clock" v-text="blackClock"></div>
         </div>
-        <div class="clock" v-text="blackClock"></div>
+
+        <div class="board" id="board"></div>
+
+        <div class="pcard" :class="{active: game.toMove==='w', nophoto: !white.showBox}">
+          <div class="avatar" v-if="white.showBox">
+            <img v-if="white.photo" :src="white.photo" alt="">
+            <template v-else>{{ white.initials }}</template>
+          </div>
+          <div class="pinfo">
+            <div class="pname"><span v-text="white.name"></span><span class="ptitle" v-if="white.title" v-text="white.title"></span></div>
+            <div class="pmeta">
+              <span v-if="white.rating">Rating <b v-text="white.rating"></b></span>
+              <span v-if="white.record">Record <span class="rec" v-text="white.record"></span></span>
+            </div>
+          </div>
+          <div class="clock" v-text="whiteClock"></div>
+        </div>
       </div>
 
-      <div class="board" id="board"></div>
+      <!-- right column: moves + sponsors -->
+      <div class="side">
+        <div class="moves">
+          <div class="cap"><span class="t">Moves<span class="pgndot" v-if="pgnDiverged"></span></span><span class="st" v-text="moveStatus"></span></div>
+          <div class="mlist" id="mlist"></div>
+        </div>
 
-      <!-- bottom player (White) -->
-      <div class="pcard" :class="{active: game.toMove==='w'}">
-        <div class="avatar">
+        <!-- zone slots: the right column's game-scene home. No active slots
+             renders nothing at all — exactly the pre-zone layout. -->
+        <zone-card v-for="z in gameSideZones" :key="z.id" :z="z"></zone-card>
+
+        <!-- Council grant credit — config: zones.funder -->
+        <div class="funder" v-if="funder.enabled && (funder.text || funder.logo)">
+          <div class="ftext" v-if="funder.text" v-text="funder.text"></div>
+          <img class="flogo" v-if="funder.logo" :src="funder.logo" alt="Greater Shepparton City Council">
+        </div>
+      </div>
+    </main>
+
+    <!-- game bottom strip (config option, default OFF): all three zone
+         columns relocate here when enabled -->
+    <div class="zstrip" v-if="gameStripZones.length">
+      <zone-card v-for="z in gameStripZones" :key="'strip-' + z.id" :z="z" :compact="true"></zone-card>
+    </div>
+
+    <footer>
+      <div class="live"><span class="dot"></span> Live</div>
+      <div class="channels">
+        Watch the board live on
+        <template v-for="(s, i) in socials" :key="i"><b v-text="s.label"></b><span v-if="i < socials.length - 1">&nbsp;·&nbsp;</span></template>
+      </div>
+      <div class="foot-club" v-text="general.website"></div>
+      <div class="board-tag" v-text="boardLabel"></div>
+    </footer>
+  </section>
+
+  <!-- ================= START ============================================ -->
+  <section class="scene sc-start" :style="sceneStyle('start')">
+    <div class="sh-wrap">
+      <div class="sh-crest"><img src="/assets/img/crest.png" alt=""></div>
+      <div class="sh-club">Shepparton Chess Club</div>
+      <div class="banner sh-banner">Stream starting soon</div>
+      <div>
+        <div class="sh-event" v-text="general.event_title"></div>
+        <div class="sh-season" v-if="general.season" v-text="general.season"></div>
+      </div>
+      <div class="sh-line" v-if="startTimesLine">Tonight&nbsp; <b v-text="startTimesLine"></b></div>
+      <div class="sh-line sh-feature" v-if="featureLine" v-text="featureLine"></div>
+      <div class="sh-site" v-text="general.website"></div>
+    </div>
+    <div class="zband" v-if="bandZones.length">
+      <zone-card v-for="z in bandZones" :key="'band-' + z.id" :z="z" :compact="true"></zone-card>
+    </div>
+  </section>
+
+  <!-- ================= VERSUS =========================================== -->
+  <section class="scene sc-versus" :style="sceneStyle('versus')">
+    <div class="vs-brand"><img src="/assets/img/crest.png" alt=""><span>Shepparton Chess Club</span></div>
+    <div class="vs-row">
+      <div class="vs-player">
+        <div class="vs-avatar" v-if="white.showBox">
           <img v-if="white.photo" :src="white.photo" alt="">
           <template v-else>{{ white.initials }}</template>
         </div>
-        <div class="pinfo">
-          <div class="pname"><span v-text="white.name"></span><span class="ptitle" v-if="white.title" v-text="white.title"></span></div>
-          <div class="pmeta">
-            <span>Rating <b v-text="white.rating"></b></span>
-            <span>Record <span class="rec" v-text="white.record"></span></span>
-          </div>
+        <div class="vs-tag">White</div>
+        <div class="vs-name"><span v-text="white.name"></span><span class="ptitle" v-if="white.title" v-text="white.title"></span></div>
+        <div class="vs-meta" v-if="white.rating || white.record"><template v-if="white.rating">Rating <b v-text="white.rating"></b></template><template v-if="white.rating && white.record">&nbsp;·&nbsp;</template><template v-if="white.record">Record <span class="rec" v-text="white.record"></span></template></div>
+      </div>
+      <div class="vs-mid"><div class="vs-vs">VS</div></div>
+      <div class="vs-player">
+        <div class="vs-avatar" v-if="black.showBox">
+          <img v-if="black.photo" :src="black.photo" alt="">
+          <template v-else>{{ black.initials }}</template>
         </div>
-        <div class="clock" v-text="whiteClock"></div>
+        <div class="vs-tag">Black</div>
+        <div class="vs-name"><span v-text="black.name"></span><span class="ptitle" v-if="black.title" v-text="black.title"></span></div>
+        <div class="vs-meta" v-if="black.rating || black.record"><template v-if="black.rating">Rating <b v-text="black.rating"></b></template><template v-if="black.rating && black.record">&nbsp;·&nbsp;</template><template v-if="black.record">Record <span class="rec" v-text="black.record"></span></template></div>
       </div>
     </div>
+    <div class="vs-foot"><b v-text="general.event_title"></b><span v-if="general.round"> &nbsp;·&nbsp; <span v-text="general.round"></span></span><span v-if="general.time_control"> &nbsp;·&nbsp; <span v-text="general.time_control"></span></span></div>
+    <div class="zband" v-if="bandZones.length">
+      <zone-card v-for="z in bandZones" :key="'band-' + z.id" :z="z" :compact="true"></zone-card>
+    </div>
+  </section>
 
-    <!-- right column: moves + sponsors -->
-    <div class="side">
-      <div class="moves">
-        <div class="cap"><span class="t">Moves</span><span class="st" v-text="moveStatus"></span></div>
-        <div class="mlist" id="mlist"></div>
+  <!-- ================= POSTGAME ========================================= -->
+  <section class="scene sc-postgame" :style="sceneStyle('postgame')">
+    <div class="vs-brand"><img src="/assets/img/crest.png" alt=""><span>Shepparton Chess Club</span></div>
+    <div class="vs-row">
+      <div class="vs-player">
+        <div class="vs-avatar" v-if="white.showBox">
+          <img v-if="white.photo" :src="white.photo" alt="">
+          <template v-else>{{ white.initials }}</template>
+        </div>
+        <div class="vs-tag">White</div>
+        <div class="vs-name"><span v-text="white.name"></span><span class="ptitle" v-if="white.title" v-text="white.title"></span></div>
+        <div class="vs-meta" v-if="white.rating || white.record"><template v-if="white.rating">Rating <b v-text="white.rating"></b></template><template v-if="white.rating && white.record">&nbsp;·&nbsp;</template><template v-if="white.record">Record <span class="rec" v-text="white.record"></span></template></div>
       </div>
-
-      <!-- sponsor area: zone content arrives with the zone system (stage 4); hidden meanwhile -->
-      <div class="sponsors" hidden>
-        <div class="cap"><span class="t">Proudly supported by</span></div>
-        <div class="slogo"></div>
+      <div class="vs-mid">
+        <div class="banner sm" v-text="postResult ? 'Final result' : 'Game complete'"></div>
+        <div class="pg-result" v-if="postResult" v-text="postResult"></div>
       </div>
-
-      <!-- Council grant credit — config: zones.funder -->
-      <div class="funder" v-if="funder.enabled && (funder.text || funder.logo)">
-        <div class="ftext" v-if="funder.text" v-text="funder.text"></div>
-        <img class="flogo" v-if="funder.logo" :src="funder.logo" alt="Greater Shepparton City Council">
+      <div class="vs-player">
+        <div class="vs-avatar" v-if="black.showBox">
+          <img v-if="black.photo" :src="black.photo" alt="">
+          <template v-else>{{ black.initials }}</template>
+        </div>
+        <div class="vs-tag">Black</div>
+        <div class="vs-name"><span v-text="black.name"></span><span class="ptitle" v-if="black.title" v-text="black.title"></span></div>
+        <div class="vs-meta" v-if="black.rating || black.record"><template v-if="black.rating">Rating <b v-text="black.rating"></b></template><template v-if="black.rating && black.record">&nbsp;·&nbsp;</template><template v-if="black.record">Record <span class="rec" v-text="black.record"></span></template></div>
       </div>
     </div>
-  </main>
-
-  <!-- ============ FOOTER ============ -->
-  <footer>
-    <div class="live"><span class="dot"></span> Live</div>
-    <div class="channels">
-      Watch the board live on
-      <template v-for="(s, i) in socials" :key="i"><b v-text="s.label"></b><span v-if="i < socials.length - 1">&nbsp;·&nbsp;</span></template>
+    <div class="vs-foot"><b v-text="general.event_title"></b><span v-if="general.round"> &nbsp;·&nbsp; <span v-text="general.round"></span></span></div>
+    <div class="zband" v-if="bandZones.length">
+      <zone-card v-for="z in bandZones" :key="'band-' + z.id" :z="z" :compact="true"></zone-card>
     </div>
-    <div class="foot-club" v-text="general.website"></div>
-    <div class="board-tag" v-text="boardLabel"></div>
-  </footer>
+  </section>
+
+  <!-- ================= INTERMISSION ===================================== -->
+  <section class="scene sc-intermission" :style="sceneStyle('intermission')">
+    <video class="iv-video" id="ivVideo" playsinline></video>
+    <div class="iv-empty" v-if="!ivHasVideo">
+      <div class="sh-wrap">
+        <div class="sh-crest"><img src="/assets/img/crest.png" alt=""></div>
+        <div class="sh-club">Shepparton Chess Club</div>
+        <div class="banner sh-banner">Back shortly</div>
+        <div class="sh-site" v-text="general.website"></div>
+      </div>
+    </div>
+    <div class="iv-mark" v-if="ivHasVideo" v-text="general.website"></div>
+  </section>
+
+  <!-- ================= ENDING =========================================== -->
+  <section class="scene sc-ending" :style="sceneStyle('ending')">
+    <div class="sh-wrap">
+      <div class="sh-crest"><img src="/assets/img/crest.png" alt=""></div>
+      <div class="sh-club">Shepparton Chess Club</div>
+      <div class="banner sh-banner">Thanks for watching</div>
+      <div>
+        <div class="sh-event" v-text="general.event_title"></div>
+        <div class="sh-season" v-if="general.season" v-text="general.season"></div>
+      </div>
+      <div class="ed-next" v-if="nextBroadcast">
+        <div class="ed-next-label" v-text="nextBroadcast.label"></div>
+        <div class="ed-next-when" v-text="nextBroadcast.when"></div>
+        <div class="ed-next-venue" v-if="nextBroadcast.venue" v-text="nextBroadcast.venue"></div>
+      </div>
+      <div class="sh-site" v-text="general.website"></div>
+    </div>
+    <div class="zband" v-if="bandZones.length">
+      <zone-card v-for="z in bandZones" :key="'band-' + z.id" :z="z" :compact="true"></zone-card>
+    </div>
+  </section>
+
+  <!-- fade-through-black curtain -->
+  <div class="curtain" :style="curtainStyle"></div>
 
   <!-- subtle warning: config poll failing (server unreachable). Last good data stays up. -->
   <div class="cfgwarn" v-if="cfgStale"></div>
@@ -309,22 +604,47 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 <script src="/js/board.js"></script>
 <script src="/js/moves.js"></script>
 <script src="/js/livechess.js"></script>
+<script src="/js/pgn.js"></script>
+<script src="/js/scenes.js"></script>
+<script src="/js/zones.js"></script>
+
+<!-- zone slot card template (see the zone-card component in the boot script) -->
+<script type="text/x-template" id="tpl-zone-card">
+<div class="sponsors zcard" :class="{compact: compact}">
+  <div class="cap"><span class="t" v-text="z.cap"></span></div>
+  <div class="slogo" v-if="z.kind === 'sponsor'">
+    <div class="item" v-for="(sp, i) in z.list" :key="i" :class="{show: i === z.idx}">
+      <div class="sstack" :class="{hasmsg: z.show !== 'image' && sp.message}">
+        <img v-if="z.show !== 'message' && sp.image" :src="'/assets/sponsors/' + encodeURIComponent(sp.image)" :alt="sp.name">
+        <div class="sname" v-if="!(z.show !== 'message' && sp.image)" v-text="sp.name"></div>
+        <div class="smsg" v-if="z.show !== 'image' && sp.message" v-text="sp.message"></div>
+      </div>
+    </div>
+  </div>
+  <div class="advert" v-else-if="z.kind === 'advertise'">
+    <div class="ad-head">Your business here</div>
+    <div class="ad-line">Partner with Shepparton Chess Club</div>
+    <div class="ad-site" v-text="website"></div>
+  </div>
+  <div class="zdata" v-else>
+    <div class="zrow" v-for="(ln, i) in z.lines" :key="i" v-text="ln"></div>
+  </div>
+</div>
+</script>
+
 <script>
 /* =========================================================================
-   BOOT — reactive game state, Vue mount, config poll, LiveChess wiring.
+   BOOT — reactive game state, Vue mount, scenes, config poll, LiveChess.
    ========================================================================= */
 "use strict";
 (function () {
-  console.info("SCC overlay build: modular stage1 2026-07-19");
+  console.info("SCC overlay build: modular stage4 2026-07-20");
 
   const { createApp, reactive, computed, watch } = Vue;
 
-  /* Reactive game state — written by livechess.js / moves.js / clock.js,
-     read by the template and the render islands below. Boots to an EMPTY
-     board: fake demo names must never reach air by accident (demo_mode in
-     board.json turns the old demo game back on deliberately). */
   const game = reactive({
     fen: SCC.board.EMPTY_PLACEMENT,
+    rawPlacement: null,           // last placement straight off the feed (detector input)
     lastMove: null,
     toMove: "w",
     moves: [],
@@ -332,7 +652,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
     started: false,
     demo: false,
     lcConnected: false,
-    clockRunSide: null,           // 'w' | 'b' | null — see clock.js
+    clockRunSide: null,
     white: { sec: null },
     black: { sec: null },
   });
@@ -343,22 +663,38 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
   SCC.clock.start(game);
 
   const cfg = SCC.config.store;
+  const sceneView = SCC.scenes.view;
+  // Init zones and pgn BEFORE mount: their computeds must find live state on
+  // their very first run — an early return with no reactive read would freeze
+  // them empty forever (computeds only re-run when a tracked dep changes).
+  SCC.zones.init(cfg);
+  SCC.pgn.init(game, cfg);
 
   function initials(name) { return name.split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase(); }
+  function fmtTimeHM(s) {
+    if (typeof s !== "string" || !s.includes(":")) return "";
+    const [h, m] = s.split(":").map(Number);
+    if (isNaN(h) || isNaN(m)) return "";
+    return (((h + 11) % 12) + 1) + ":" + String(m).padStart(2, "0") + " " + (h >= 12 ? "pm" : "am");
+  }
 
-  // Player identity: demo mode shows the original demo players; otherwise the
-  // manual White/Black entries from players.json (Pairingsman arrives later).
   function playerView(side) {
     return computed(() => {
       const demo = !!cfg.data.board.demo_mode;
       const src = demo ? SCC.livechess.DEMO[side]
         : ((cfg.data.players.manual && cfg.data.players.manual[side]) || {});
+      const mode = cfg.data.players.global_photo_mode || "photos_and_avatars";
+      const photo = mode === "no_photos" ? "" : (src.photo || src.avatar || "");
       return {
         name: src.name || "—",
         title: src.title || "",
-        rating: src.rating || "—",
-        record: src.record || "—",
-        photo: src.photo || src.avatar || "",
+        rating: src.rating == null ? "" : String(src.rating),
+        record: src.record || "",
+        photo,
+        // photos_and_avatars: photo, else initials avatar. photos_only:
+        // photo or nothing. no_photos: nothing — the card collapses the
+        // avatar cell (.nophoto).
+        showBox: mode === "no_photos" ? false : (!!photo || mode === "photos_and_avatars"),
         initials: initials(src.name || "?"),
       };
     });
@@ -383,26 +719,190 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       const blackClock = computed(() => game.black.sec != null ? SCC.clock.fmtSec(game.black.sec) : "—:—:—");
       const moveStatus = computed(() => (game.toMove === "w" ? "White" : "Black") + " to move");
       const cfgStale = computed(() => cfg.loaded && !cfg.ok);
-      return { game, general, boardLabel, roundLabel, socials, funder, white, black, whiteClock, blackClock, moveStatus, cfgStale };
+      /* PGN divergence (stage 5): the one on-air signal — a quiet dot */
+      const pgnDiverged = computed(() => SCC.pgn.state.status === "diverged");
+
+      /* scenes */
+      const sceneStyle = (name) => SCC.scenes.layerState(name);
+      const curtainStyle = computed(() => ({
+        opacity: sceneView.curtainOn ? 1 : 0,
+        transitionDuration: (sceneView.curtainMs || 0) + "ms",
+      }));
+
+      /* start scene lines */
+      const startTimesLine = computed(() => {
+        const g = cfg.data.general;
+        const a = fmtTimeHM(g.running_time_start), b = fmtTimeHM(g.running_time_end);
+        if (a && b) return a + " – " + b;
+        if (a) return "from " + a;
+        return "";
+      });
+      const featureLine = computed(() => {
+        const t = fmtTimeHM(cfg.data.general.feature_match_time);
+        return t ? "Feature match at " + t : "";
+      });
+
+      /* postgame result (manual until the PGN / Pairingsman stages) */
+      const postResult = computed(() => {
+        const sc = cfg.data.scenes.scenes || {};
+        return (sc.postgame && sc.postgame.result_text) || "";
+      });
+
+      /* ending: next-on-air. Manual override → as typed. Otherwise the
+         COMPUTED default: same running time, recurrence_days forward (the
+         Pairingsman next_meeting source arrives in its stage and will win
+         over this default when the field is set to auto). Hidden → nothing. */
+      const nextBroadcast = computed(() => {
+        const g = cfg.data.general;
+        const nb = g.next_broadcast || {};
+        if (nb.mode === "hidden") return null;
+        const label = nb.label || "Next broadcast";
+        if (nb.mode === "manual" && (nb.manual_date || nb.manual_time)) {
+          return { label, when: [nb.manual_date, nb.manual_time].filter(Boolean).join(" · "), venue: "" };
+        }
+        const days = Number(nb.recurrence_days) || 7;
+        const d = new Date(Date.now() + days * 86400000);
+        const datePart = d.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
+        const t = fmtTimeHM(g.running_time_start);
+        return { label, when: t ? datePart + " · " + t : datePart, venue: g.location || "" };
+      });
+
+      /* intermission */
+      const ivHasVideo = computed(() => {
+        const iv = (cfg.data.scenes.scenes || {}).intermission || {};
+        return !!iv.video;
+      });
+
+      /* zones (stage 4) — read reactive config + rotation state, so sponsor
+         crossfades and config edits re-render without any explicit wiring */
+      const bandZones = computed(() => SCC.zones.bandZones());
+      const gameSideZones = computed(() => SCC.zones.gameSideZones());
+      const gameStripZones = computed(() => SCC.zones.gameStripZones());
+
+      return {
+        game, general, boardLabel, roundLabel, socials, funder, white, black,
+        whiteClock, blackClock, moveStatus, cfgStale, pgnDiverged,
+        sceneStyle, curtainStyle, startTimesLine, featureLine, postResult,
+        nextBroadcast, ivHasVideo,
+        bandZones, gameSideZones, gameStripZones,
+      };
     },
   });
+
+  /* Zone slot card — one template for the game side panel, the bottom strip
+     and the open-scene bands (compact). Sponsor items stay stacked and
+     crossfade via the original .slogo .item.show opacity transition. */
+  app.component("zone-card", {
+    props: { z: { type: Object, required: true }, compact: { type: Boolean, default: false } },
+    computed: {
+      website() { return SCC.config.store.data.general.website || "sheppartonchess.club"; },
+    },
+    template: "#tpl-zone-card",
+  });
+
   app.mount("#app");
 
-  /* Imperative render islands — the original board / move-list renderers,
-     reused verbatim (board.js / moves.js), driven by watchers. */
+  /* Imperative render islands — original board / move-list renderers. */
   const boardEl = document.getElementById("board");
   const mlistEl = document.getElementById("mlist");
   watch(() => [game.fen, game.lastMove], () => SCC.board.render(boardEl, game), { immediate: true });
-  watch(() => [game.moves.length, game.currentPly], () => SCC.moves.renderList(mlistEl, game), { immediate: true });
+  // moveTimes covers moves.length / currentPly / timesVersion / pgn rev /
+  // the move_times toggle — one recompute re-renders the list with times.
+  {
+    const mtimes = computed(() => {
+      void SCC.pgn.state.rev; void game.timesVersion; void game.currentPly;
+      if (cfg.data.board.move_times === false) return null;
+      const out = [];
+      for (let i = 0; i < game.moves.length; i++) {
+        const p = SCC.pgn.timeFor(i);
+        out.push(p != null ? p : SCC.moves.obsTime(i));
+      }
+      return out;
+    });
+    watch(() => [game.moves.length, game.currentPly, mtimes.value],
+      () => SCC.moves.renderList(mlistEl, game, mtimes.value), { immediate: true });
+  }
 
-  /* Config poll loop → LiveChess wiring. apply() diffs internally, so calling
-     it on every config change is safe: unrelated writes never touch the
-     connection or the move list. */
+  /* ---------------- intermission video: chapters + resume ---------------- */
+  /* Chapter model: chapters are start offsets (seconds). On returning to
+     intermission the video resumes from the start of the interrupted chapter
+     (default), or exact / rewind-N / restart per config. Progress persists
+     across page reloads via localStorage.                                    */
+  (function intermissionVideo() {
+    const LS_KEY = "scc.intermission.progress";
+    const el = document.getElementById("ivVideo");
+    let persistTimer = null;
+    let currentName = null;
+
+    const ivCfg = () => ((cfg.data.scenes.scenes || {}).intermission) || {};
+
+    function saved() {
+      try { return JSON.parse(localStorage.getItem(LS_KEY)) || null; } catch (e) { return null; }
+    }
+    function persist() {
+      if (!currentName || !el.currentTime) return;
+      try { localStorage.setItem(LS_KEY, JSON.stringify({ video: currentName, pos: el.currentTime, updated: Date.now() })); } catch (e) { }
+    }
+    function resumePos(iv) {
+      const s = saved();
+      if (!s || s.video !== iv.video) return 0;
+      const mode = iv.resume_mode || "chapter";
+      if (mode === "restart") return 0;
+      if (mode === "exact") return s.pos;
+      if (mode === "rewind") return Math.max(0, s.pos - (Number(iv.rewind_ms) || 5000) / 1000);
+      // chapter (default): start of the chapter the interruption happened in
+      const starts = (Array.isArray(iv.chapters) && iv.chapters.length ? iv.chapters : [{ start: 0 }])
+        .map(c => Number(c.start) || 0).sort((a, b) => a - b);
+      let best = 0;
+      for (const st of starts) if (st <= s.pos) best = st;
+      return best;
+    }
+    function applyConfig() {
+      const iv = ivCfg();
+      const name = iv.video || "";
+      el.loop = iv.loop !== false;
+      el.muted = !!iv.muted;
+      if (name !== currentName) {
+        if (currentName) persist();
+        currentName = name || null;
+        if (name) { el.src = "/assets/video/" + encodeURIComponent(name); el.load(); }
+        else { el.removeAttribute("src"); el.load(); }
+        if (SCC.scenes.view.current === "intermission" && name) enter();
+      }
+    }
+    function seekTo(pos) {
+      const doSeek = () => { try { el.currentTime = pos; } catch (e) { } };
+      if (el.readyState >= 1) doSeek();
+      else el.addEventListener("loadedmetadata", doSeek, { once: true });
+    }
+    function enter() {
+      const iv = ivCfg();
+      if (!iv.video) return;
+      seekTo(resumePos(iv));
+      el.play().catch(() => { el.muted = true; el.play().catch(() => { }); });
+      clearInterval(persistTimer);
+      persistTimer = setInterval(persist, 2000);
+    }
+    function leave() {
+      persist();
+      el.pause();
+      clearInterval(persistTimer); persistTimer = null;
+    }
+
+    SCC.scenes.onSceneChange((to, from) => {
+      if (to === "intermission") enter();
+      else if (from === "intermission") leave();
+    });
+    SCC.config.onChange(() => applyConfig());
+  })();
+
+  /* Config poll → LiveChess wiring; scenes engine. */
   if (typeof Chess === "undefined") {
     console.warn("chess.js failed to load — check vendor/chess-0.10.3.min.js; board stays empty.");
   } else {
     SCC.config.onChange((data) => SCC.livechess.apply(data.board));
   }
+  SCC.scenes.init(game, cfg);
   SCC.config.start();
 
   /* scale the fixed 1920x1080 canvas to fit the window; OBS at 1920x1080 renders it 1:1 */

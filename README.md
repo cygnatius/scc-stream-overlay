@@ -1,56 +1,64 @@
 # Shepparton Chess Club — Stream Overlay
 
-Broadcast overlay for streaming club chess games. A single self-contained HTML
-file — `scc-stream-overlay.html` — loaded as an **OBS Browser Source**
-(1920×1080). It renders the live board, move list, clocks and player cards,
-themed to the club site, with the live game coming from **DGT LiveChess**.
+Broadcast overlay for streaming club chess games, rendered by OBS from a tiny
+local web server. It shows the live board, clocks, move list, player cards,
+a six-scene broadcast flow (start / versus / game / postgame / intermission /
+ending), sponsor zones and the council funder credit — all themed to the club
+site, with the live game coming from **DGT LiveChess** and everything operated
+from a browser **admin page** while on air.
 
-Player/event data comes from one of two sources, chosen by a single toggle:
+```
+server.js            zero-dependency local server (node http/fs/path only)
+                     binds 127.0.0.1:8420 — never exposed to the network
+public/display.html  the OBS browser source (1920×1080)
+public/admin.html    the operator control panel (open in a normal browser)
+public/js/           modules: config, board, clock, moves, livechess, scenes, zones
+config/*.json        all settings; written by the admin page, hot-reloaded
+                     by the display within ~half a second (gitignored)
+assets/              sponsor logos, player photos, intermission video, club art
+vendor/              Vue 3, chess.js 0.10.3, fonts — fully vendored
+start-overlay.bat    double-click launcher; prints the two URLs
+```
 
-| `pairingsman.enabled` | Where players / round / record come from | Needs a token |
-|-----------------------|-------------------------------------------|---------------|
-| `false` (default) | You type them into the `STATE` block | No |
-| `true` | Pairingsman v1 API (auto-filled) | Yes (keep private) |
+**No build step, no npm installs, no internet required during a broadcast** —
+every dependency is vendored because the venue streams over mobile tethering.
 
-Either way, the board / moves / clocks come live from DGT LiveChess, and a
-sponsor area (0, 1, or many logos — rotating if several) sits under the moves.
+## Quick start
 
-## Quick start (OBS)
+1. Install [Node.js](https://nodejs.org) (any recent LTS) — the only requirement.
+2. Double-click **`start-overlay.bat`** (or run `node server.js`). Leave the
+   window open.
+3. In OBS: **Sources → + → Browser**, untick *Local file*, URL
+   `http://127.0.0.1:8420/display.html`, **1920×1080**. Leave *Shutdown source
+   when not visible* **unchecked**.
+4. Open `http://127.0.0.1:8420/admin.html` in a normal browser and run the
+   broadcast from there — scenes, players, event details, sponsors, video.
 
-1. In OBS: **Sources → + → Browser**, tick **Local file**, choose
-   `scc-stream-overlay.html`, set **1920×1080**.
-2. Open the file in a text editor and fill the `CONFIG` block near the bottom:
-   - `livechess.host` — the LiveChess PC's address. Same PC as OBS →
-     `127.0.0.1:1982`; different PC → its LAN IP, e.g. `192.168.0.92:1982`.
-   - `pairingsman.enabled` — leave `false` to type players by hand; set `true`
-     (and fill `token` + `meetingId`) to auto-fill from Pairingsman.
-3. In manual mode (`enabled:false`), type the players/event in the `STATE` block.
-   Add sponsor logos to the `STATE.sponsors` array (empty = no sponsor panel).
-4. Save, then right-click the source → **Refresh**.
+Changes made in admin appear on the stream within half a second. No file
+editing, no OBS refresh. Full venue walkthrough: **SCC-Overlay-Setup.md**;
+operating the admin page: **SCC-Overlay-Manual-Setup.md**.
 
-Full walkthroughs are in `docs/`.
+## Live data
 
-## Requirements at the venue
+- **Board / clocks / moves** — DGT LiveChess over its websocket. LiveChess
+  runs on the same machine, so the default `127.0.0.1:1982` just works; a
+  manual host override in admin covers the two-machine fallback.
+- **Players / event** — typed in admin (roster with photos supported), or
+  auto-filled from the Pairingsman broadcast API once that integration stage
+  lands. The overlay is fully operable with Pairingsman absent.
 
-- DGT LiveChess running with the board connected.
-- If OBS and LiveChess are on different PCs: same network, port **1982** open.
-- Internet on the OBS PC (fonts + the chess library load online — see brief
-  about bundling locally).
+## The legacy single file
 
-## Important constraints
+`scc-stream-overlay.html` at the repo root is the previous self-contained
+overlay, kept untouched as the working reference until the served system has
+been venue-verified. Its setup docs described editing a `CONFIG` block by
+hand — that workflow is retired by the admin page.
 
-- **Don't commit the Pairingsman token.** Only matters once you set
-  `pairingsman.enabled:true` and fill in a `token`. Keep this repo private, or
-  keep the token out of git. With the toggle off, the file has no secrets.
-- **Don't serve the live overlay from GitHub Pages.** An HTTPS page can't open an
-  insecure `ws://` connection to LiveChess. Git is for managing the files; OBS
-  loads them as local files.
+## Keep private
 
-## Development
-
-See `PROJECT-BRIEF.md` for architecture, the hard-won implementation notes, and
-the open task list. Testing happens on the venue setup (LiveChess + OBS), not the
-dev machine.
+`config/pairingsman.json` will hold a bearer token once the Pairingsman stage
+is in use. `config/*.json` is gitignored for exactly that reason — don't
+commit config, and don't publish a copy of the folder with config in it.
 
 ## License
 

@@ -38,6 +38,30 @@ const MAX_BODY = 20 * 1024 * 1024;      // 20 MB — covers player photos / spon
    The merged (defaults ⊕ file) object is what /api/config returns, so the
    display always receives a complete shape.
    ------------------------------------------------------------------------ */
+// Zone slot ids: left/centre/right, each whole or split into top+bottom.
+// Nine addressable ids; the ones that render are those consistent with the
+// column split state, and at most six can render at once.
+const ZONE_SLOT_IDS = [
+  "left", "left_top", "left_bottom",
+  "centre", "centre_top", "centre_bottom",
+  "right", "right_top", "right_bottom",
+];
+function defaultZoneSlot() {
+  return {
+    active: false,                       // every slot OFF by default: overlay renders as today
+    source: "sponsors",                  // sponsors | data ("sponsors" with no tier = advertise-here invite)
+    tier: "",                            // premier | major | regular | minor | "" (unassigned)
+    rotate_ms: 8000,                     // sponsor rotation frequency
+    show: "both",                        // image | message | both
+    data_kind: "results",                // tournament_leaderboard | meeting_leaderboard | concurrent_pairings | results
+    data_mode: "manual",                 // auto (Pairingsman, its stage) | manual | hidden
+    data_title: "",
+    data_lines: [],                      // manual content, one display line per entry
+  };
+}
+const DEFAULT_ZONE_SLOTS = {};
+for (const id of ZONE_SLOT_IDS) DEFAULT_ZONE_SLOTS[id] = defaultZoneSlot();
+
 const CONFIG_DEFAULTS = {
   general: {
     event_title: "Club Championship 2026",
@@ -74,24 +98,58 @@ const CONFIG_DEFAULTS = {
     poll_ms: 800,                        // eboards poll over the LiveChess websocket
     demo_mode: false,                    // true = show the built-in demo game (design aid).
                                          // Fake names must never reach air by accident.
+    move_times: true,                    // per-move times beside each move in the list
+    pgn: {
+      enabled: true,                     // probe LiveChess for the game PGN (times + verification)
+      url: "",                           // explicit PGN URL; empty = probe candidates on the host
+      poll_ms: 6000,                     // display → /api/pgn cadence (slow; separate from config poll)
+    },
   },
 
   scenes: {
     active: "game",                      // start | versus | game | postgame | intermission | ending
-    default_transition: { type: "fade", duration_ms: 1000, delay_ms: 0 },
-    scenes: {                            // per-scene overrides land here (stage 2)
-      start: {},
-      versus: {},
-      game: { bottom_strip: false },     // optional sponsor strip above the footer, default OFF
-      postgame: {},
-      intermission: {},
-      ending: {},
+    // A running sequence: {name:"game_start"|"game_end", started_at:<epoch ms>}.
+    // The display computes the current phase from started_at, so a reload
+    // resumes mid-sequence. null = no sequence; `active` shows directly.
+    sequence: null,
+    // A cancellable automatic transition awaiting its arm delay:
+    // {action:"game_start"|"game_end", fires_at:<epoch ms>, reason:"…"}.
+    // Written by the display's detector; cleared by admin cancel, by any
+    // manual scene command, or by the display when it fires or loses
+    // confidence. null = nothing pending.
+    pending_auto: null,
+    auto: {
+      enabled: false,                    // board-state driven switching; operator opt-in
+      arm_delay_ms: 4000,                // cancel window before an auto transition fires
+    },
+    default_transition: { type: "fade", duration_ms: 1000, delay_ms: 0, direction: "left" },
+    transitions: {                       // per-type parameter defaults
+      cut: {},
+      fade: {},
+      crossfade: {},
+      slide: { direction: "left" },
+      wipe: { direction: "left" },
+    },
+    scenes: {                            // per-scene settings; transition overrides the default on ENTER
+      start: { transition: null },
+      versus: { transition: null },
+      game: { transition: null, bottom_strip: false },  // strip is stage 4, default OFF
+      postgame: { transition: null, result_text: "" },  // manual result until PGN/Pairingsman stages
+      intermission: {
+        transition: null,
+        video: "",                       // filename inside assets/video/
+        chapters: [{ start: 0 }],        // chapter start offsets in seconds
+        resume_mode: "chapter",          // chapter | exact | rewind | restart
+        rewind_ms: 5000,
+        loop: true,
+        muted: false,
+      },
+      ending: { transition: null },
     },
     sequences: {
       game_start: { versus_ms: 8000 },
       game_end: { postgame_ms: 40000, start_ms: 150000 },
     },
-    auto_transitions: false,             // board-state driven switching (stage 2)
   },
 
   sponsors: {
@@ -99,10 +157,17 @@ const CONFIG_DEFAULTS = {
   },
 
   zones: {
-    // Six-slot model: left/centre/right, each whole or split top/bottom.
-    // Availability is per scene; the game scene provides right_top/right_bottom
-    // (the existing under-moves panel) unless its bottom strip is enabled.
-    slots: {},
+    // Six-slot model. Availability is per scene (zones.js owns the map):
+    // open scenes (start/versus/postgame/ending) show all columns as a band;
+    // the game scene shows the right column in the side panel under the
+    // moves — unless scenes.json → scenes.game.bottom_strip relocates all
+    // columns into a strip above the footer.
+    columns: {
+      left: { split: false },
+      centre: { split: false },
+      right: { split: false },
+    },
+    slots: DEFAULT_ZONE_SLOTS,
     funder: {                            // Council grant credit — preserved exactly as today
       enabled: true,
       text: "Proudly funded by Greater Shepparton City Council Grant Programs",
@@ -332,10 +397,130 @@ function readBody(req, res, cb) {
   req.on("error", () => {});
 }
 
+// Display runtime status — RAM only, never touches disk. The display POSTs its
+// heartbeat (~1s: detector state, confidence, effective scene, connection flags)
+// and the admin polls it. Kept out of the config store so status churn never
+// invalidates the config hash or triggers the display's own poll loop.
+let DISPLAY_STATUS = null;
+let DISPLAY_STATUS_AT = 0;
+
+/* ---------------------------------------------------------- PGN source
+   The display cannot fetch LiveChess's HTTP endpoints itself (no CORS
+   headers there), so this loopback server probes for the game PGN on its
+   behalf. Candidates derive from the configured LiveChess host; an explicit
+   board.pgn.url overrides. The last working URL is sticky, the last good
+   text is cached, and a failed probe returns the cache flagged stale — the
+   display never sees a blank where it had data. LiveChess absent or serving
+   no PGN is a NORMAL state: {status:"absent"}, quietly.                    */
+let PGN_CACHE = null;                    // { text, url, at }
+let PGN_STICKY_URL = null;
+let PGN_LAST_ATTEMPT = 0;
+
+function lcEffectiveHost(b) {
+  let h = (b.manual_host_override && b.manual_host) ? String(b.manual_host).trim() : String(b.host || "").trim();
+  if (!h) return null;
+  if (!h.includes(":")) h = h + ":" + (Number(b.port) || 1982);
+  return h;
+}
+
+function pgnCandidates(board) {
+  const explicit = board.pgn && String(board.pgn.url || "").trim();
+  if (explicit) {
+    if (/^https?:\/\//i.test(explicit)) return [explicit];
+    const host = lcEffectiveHost(board);
+    return host ? ["http://" + host + (explicit.startsWith("/") ? "" : "/") + explicit] : [];
+  }
+  const host = lcEffectiveHost(board);
+  if (!host) return [];
+  return ["http://" + host + "/pgn", "http://" + host + "/pgn/games.pgn", "http://" + host + "/api/v1.0/pgn"];
+}
+
+function looksLikePgn(text) {
+  return /\[(Event|White|Site|Result)\s+"/.test(text) || /\b\d+\.\s*(?:[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8]|O-O)/.test(text);
+}
+
+async function fetchPgnOnce(url) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 1500);
+  try {
+    const r = await fetch(url, { signal: ctl.signal });
+    if (!r.ok) return null;
+    const text = await r.text();
+    if (!text || text.length > 2 * 1024 * 1024 || !looksLikePgn(text)) return null;
+    return text;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function handlePgn(res) {
+  const board = readConfigFile("board");
+  if (!board.pgn || board.pgn.enabled === false) return sendJSON(res, 200, { ok: false, status: "disabled" });
+
+  // The client cadence governs; still, never probe more than ~once a second.
+  const now = Date.now();
+  if (now - PGN_LAST_ATTEMPT >= 1000) {
+    PGN_LAST_ATTEMPT = now;
+    const list = pgnCandidates(board);
+    const ordered = PGN_STICKY_URL && list.includes(PGN_STICKY_URL)
+      ? [PGN_STICKY_URL, ...list.filter(u => u !== PGN_STICKY_URL)]
+      : list;
+    for (const url of ordered) {
+      const text = await fetchPgnOnce(url);
+      if (text !== null) {
+        PGN_STICKY_URL = url;
+        PGN_CACHE = { text, url, at: now };
+        break;
+      }
+    }
+  }
+
+  if (!PGN_CACHE) return sendJSON(res, 200, { ok: false, status: "absent" });
+  return sendJSON(res, 200, {
+    ok: true,
+    pgn: PGN_CACHE.text,
+    source: PGN_CACHE.url,
+    fetched_at: PGN_CACHE.at,
+    stale: Date.now() - PGN_CACHE.at > Math.max(4000, (Number(board.pgn.poll_ms) || 6000) * 2),
+  });
+}
+
 function handleApi(req, res, pathname) {
   // GET /api/config/hash — the display's cheap poll target.
   if (req.method === "GET" && pathname === "/api/config/hash") {
     return sendJSON(res, 200, { ok: true, hash: configHash() });
+  }
+
+  // GET /api/pgn — probe/relay the LiveChess game PGN (see PGN source above).
+  if (req.method === "GET" && pathname === "/api/pgn") {
+    handlePgn(res).catch(() => { try { sendError(res, 500, "pgn probe failed"); } catch { } });
+    return;
+  }
+
+  // Display heartbeat: POST from the display page, GET from admin.
+  if (pathname === "/api/status") {
+    if (req.method === "POST") {
+      return readBody(req, res, (buf) => {
+        try {
+          const parsed = JSON.parse(buf.toString("utf8"));
+          if (!isPlainObject(parsed)) return sendError(res, 400, "status must be a JSON object");
+          DISPLAY_STATUS = parsed;
+          DISPLAY_STATUS_AT = Date.now();
+          return sendJSON(res, 200, { ok: true });
+        } catch {
+          return sendError(res, 400, "invalid JSON");
+        }
+      });
+    }
+    if (req.method === "GET") {
+      return sendJSON(res, 200, {
+        ok: true,
+        status: DISPLAY_STATUS,
+        age_ms: DISPLAY_STATUS ? Date.now() - DISPLAY_STATUS_AT : null,
+      });
+    }
   }
 
   // GET /api/config — everything merged, plus the hash it corresponds to.
