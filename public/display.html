@@ -389,11 +389,11 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
         <div class="crest"><img src="/assets/img/crest.png" alt="Shepparton Chess Club"></div>
         <div>
           <h1>Shepparton Chess Club</h1>
-          <div class="sub" v-text="general.location"></div>
+          <div class="sub" v-text="venueLine"></div>
         </div>
       </div>
       <div class="event">
-        <div class="tname" v-text="general.event_title"></div>
+        <div class="tname" v-text="eventTitle"></div>
         <div class="round" v-text="roundLabel"></div>
       </div>
     </header>
@@ -477,11 +477,11 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       <div class="sh-club">Shepparton Chess Club</div>
       <div class="banner sh-banner">Stream starting soon</div>
       <div>
-        <div class="sh-event" v-text="general.event_title"></div>
+        <div class="sh-event" v-text="eventTitle"></div>
         <div class="sh-season" v-if="general.season" v-text="general.season"></div>
       </div>
       <div class="sh-line" v-if="startTimesLine">Tonight&nbsp; <b v-text="startTimesLine"></b></div>
-      <div class="sh-line sh-feature" v-if="featureLine" v-text="featureLine"></div>
+      <div class="sh-line sh-feature" v-for="(fl, i) in featureLines" :key="i" v-text="fl"></div>
       <div class="sh-site" v-text="general.website"></div>
     </div>
     <div class="zband" v-if="bandZones.length">
@@ -513,7 +513,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
         <div class="vs-meta" v-if="black.rating || black.record"><template v-if="black.rating">Rating <b v-text="black.rating"></b></template><template v-if="black.rating && black.record">&nbsp;·&nbsp;</template><template v-if="black.record">Record <span class="rec" v-text="black.record"></span></template></div>
       </div>
     </div>
-    <div class="vs-foot"><b v-text="general.event_title"></b><span v-if="general.round"> &nbsp;·&nbsp; <span v-text="general.round"></span></span><span v-if="general.time_control"> &nbsp;·&nbsp; <span v-text="general.time_control"></span></span></div>
+    <div class="vs-foot"><b v-text="eventTitle"></b><span v-if="general.round"> &nbsp;·&nbsp; <span v-text="general.round"></span></span><span v-if="general.time_control"> &nbsp;·&nbsp; <span v-text="general.time_control"></span></span></div>
     <div class="zband" v-if="bandZones.length">
       <zone-card v-for="z in bandZones" :key="'band-' + z.id" :z="z" :compact="true"></zone-card>
     </div>
@@ -546,7 +546,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
         <div class="vs-meta" v-if="black.rating || black.record"><template v-if="black.rating">Rating <b v-text="black.rating"></b></template><template v-if="black.rating && black.record">&nbsp;·&nbsp;</template><template v-if="black.record">Record <span class="rec" v-text="black.record"></span></template></div>
       </div>
     </div>
-    <div class="vs-foot"><b v-text="general.event_title"></b><span v-if="general.round"> &nbsp;·&nbsp; <span v-text="general.round"></span></span></div>
+    <div class="vs-foot"><b v-text="eventTitle"></b><span v-if="general.round"> &nbsp;·&nbsp; <span v-text="general.round"></span></span></div>
     <div class="zband" v-if="bandZones.length">
       <zone-card v-for="z in bandZones" :key="'band-' + z.id" :z="z" :compact="true"></zone-card>
     </div>
@@ -573,7 +573,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       <div class="sh-club">Shepparton Chess Club</div>
       <div class="banner sh-banner">Thanks for watching</div>
       <div>
-        <div class="sh-event" v-text="general.event_title"></div>
+        <div class="sh-event" v-text="eventTitle"></div>
         <div class="sh-season" v-if="general.season" v-text="general.season"></div>
       </div>
       <div class="ed-next" v-if="nextBroadcast">
@@ -605,6 +605,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 <script src="/js/moves.js"></script>
 <script src="/js/livechess.js"></script>
 <script src="/js/pgn.js"></script>
+<script src="/js/pairingsman.js"></script>
 <script src="/js/scenes.js"></script>
 <script src="/js/zones.js"></script>
 
@@ -669,6 +670,19 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
   // them empty forever (computeds only re-run when a tracked dep changes).
   SCC.zones.init(cfg);
   SCC.pgn.init(game, cfg);
+  SCC.pairingsman.init(cfg);
+
+  /* Field tri-state (stage 6): hidden → nothing; auto → the Pairingsman
+     value when present, else the manual value (null = not available, per
+     the contract); manual → the manual value. Everything already hides on
+     empty strings, so hidden simply yields "".                            */
+  const pm = SCC.pairingsman;
+  function fieldVal(name, manualValue) {
+    const mode = pm.fieldMode(name);
+    if (mode === "hidden") return "";
+    if (mode === "auto") { const a = pm.auto(name); if (a != null && a !== "") return a; }
+    return manualValue;
+  }
 
   function initials(name) { return name.split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase(); }
   function fmtTimeHM(s) {
@@ -681,8 +695,18 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
   function playerView(side) {
     return computed(() => {
       const demo = !!cfg.data.board.demo_mode;
-      const src = demo ? SCC.livechess.DEMO[side]
-        : ((cfg.data.players.manual && cfg.data.players.manual[side]) || {});
+      let src;
+      if (demo) src = SCC.livechess.DEMO[side];
+      else {
+        const fmode = pm.fieldMode("players");
+        const man = (cfg.data.players.manual && cfg.data.players.manual[side]) || {};
+        const a = fmode === "auto" ? pm.auto("players") : null;
+        if (fmode === "hidden") src = {};
+        else if (a && a[side] && a[side].name) {
+          const p = a[side];
+          src = { name: p.name, title: p.title, rating: p.rating, record: p.record, photo: p.photo_url || "" };
+        } else src = man;                // auto with nothing available → manual (per contract)
+      }
       const mode = cfg.data.players.global_photo_mode || "photos_and_avatars";
       const photo = mode === "no_photos" ? "" : (src.photo || src.avatar || "");
       return {
@@ -703,12 +727,22 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
   const app = createApp({
     setup() {
       const general = computed(() => cfg.data.general);
+      /* Pairingsman-resolved fields (auto → manual → hidden per config) */
+      const eventTitle = computed(() => fieldVal("event_title", cfg.data.general.event_title));
+      const venueLine = computed(() => fieldVal("venue", cfg.data.general.location));
       const boardLabel = computed(() => {
         const g = cfg.data.general;
+        const mode = pm.fieldMode("table");
+        if (mode === "hidden") return "";
+        if (mode === "auto") {
+          const t = pm.auto("table");
+          if (t && (t.name || t.number != null)) return t.name || ("Board " + t.number);
+        }
         return g.table_name || ("Board " + (g.table_number || 1));
       });
       const roundLabel = computed(() => {
         const r = cfg.data.general.round;
+        if (!boardLabel.value) return r || "";
         return r ? r + " · " + boardLabel.value : boardLabel.value;
       });
       const socials = computed(() => (cfg.data.general.social_links || []).filter(s => s && s.label));
@@ -732,26 +766,47 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       /* start scene lines */
       const startTimesLine = computed(() => {
         const g = cfg.data.general;
-        const a = fmtTimeHM(g.running_time_start), b = fmtTimeHM(g.running_time_end);
+        const mode = pm.fieldMode("schedule");
+        if (mode === "hidden") return "";
+        let start = g.running_time_start, end = g.running_time_end;
+        if (mode === "auto") {
+          const s = pm.auto("schedule");                 // meeting open/close, wall time
+          if (s && (s.open || s.close)) { start = pm.isoHM(s.open); end = pm.isoHM(s.close); }
+        }
+        const a = fmtTimeHM(start), b = fmtTimeHM(end);
         if (a && b) return a + " – " + b;
         if (a) return "from " + a;
         return "";
       });
-      const featureLine = computed(() => {
-        const t = fmtTimeHM(cfg.data.general.feature_match_time);
-        return t ? "Feature match at " + t : "";
+      // Feature matches: the Pairingsman feature_matches array (derived
+      // server-side from is_featured — never matched on table name). A null
+      // scheduled_start falls to the manual time; both unset → no time shown.
+      const featureLines = computed(() => {
+        const mode = pm.fieldMode("feature_matches");
+        if (mode === "hidden") return [];
+        const manualT = fmtTimeHM(cfg.data.general.feature_match_time);
+        if (mode === "auto") {
+          const fms = pm.auto("feature_matches");
+          if (fms) return fms.slice(0, 3).map(fm => {
+            const t = fm.scheduled_start ? fmtTimeHM(pm.isoHM(fm.scheduled_start)) : manualT;
+            const who = [fm.white, fm.black].filter(Boolean).join(" v ");
+            return ["Feature" + (fm.surface ? " · " + fm.surface : ""), who, t]
+              .filter(Boolean).join(" — ");
+          });
+        }
+        return manualT ? ["Feature match at " + manualT] : [];
       });
 
-      /* postgame result (manual until the PGN / Pairingsman stages) */
+      /* postgame result: Pairingsman label as received → manual → hidden */
       const postResult = computed(() => {
         const sc = cfg.data.scenes.scenes || {};
-        return (sc.postgame && sc.postgame.result_text) || "";
+        return fieldVal("result", (sc.postgame && sc.postgame.result_text) || "");
       });
 
-      /* ending: next-on-air. Manual override → as typed. Otherwise the
-         COMPUTED default: same running time, recurrence_days forward (the
-         Pairingsman next_meeting source arrives in its stage and will win
-         over this default when the field is set to auto). Hidden → nothing. */
+      /* ending: next-on-air. Manual override → as typed. Auto → the
+         Pairingsman next_meeting when present (it wins over the computed
+         default), else the COMPUTED default: same running time,
+         recurrence_days forward. Hidden → nothing. */
       const nextBroadcast = computed(() => {
         const g = cfg.data.general;
         const nb = g.next_broadcast || {};
@@ -759,6 +814,11 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
         const label = nb.label || "Next broadcast";
         if (nb.mode === "manual" && (nb.manual_date || nb.manual_time)) {
           return { label, when: [nb.manual_date, nb.manual_time].filter(Boolean).join(" · "), venue: "" };
+        }
+        const nm = pm.auto("next_meeting");              // null when nothing further is scheduled
+        if (nm && nm.open) {
+          const t = fmtTimeHM(pm.isoHM(nm.open));
+          return { label, when: pm.isoDateLabel(nm.open) + (t ? " · " + t : ""), venue: nm.venue || "" };
         }
         const days = Number(nb.recurrence_days) || 7;
         const d = new Date(Date.now() + days * 86400000);
@@ -780,9 +840,9 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       const gameStripZones = computed(() => SCC.zones.gameStripZones());
 
       return {
-        game, general, boardLabel, roundLabel, socials, funder, white, black,
+        game, general, eventTitle, venueLine, boardLabel, roundLabel, socials, funder, white, black,
         whiteClock, blackClock, moveStatus, cfgStale, pgnDiverged,
-        sceneStyle, curtainStyle, startTimesLine, featureLine, postResult,
+        sceneStyle, curtainStyle, startTimesLine, featureLines, postResult,
         nextBroadcast, ivHasVideo,
         bandZones, gameSideZones, gameStripZones,
       };
