@@ -144,6 +144,14 @@ button.rowdel:hover{border-color:var(--err);color:var(--err)}
 .vitem .meta{color:var(--cream-dim);font-size:13px;flex:none}
 .vmissing{color:var(--err);font-size:13px;font-weight:700;margin-top:8px}
 
+/* music library */
+.murow{display:grid;grid-template-columns:22px minmax(0,1fr) auto auto;gap:10px;align-items:center;
+  background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.murow .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.murow .meta{color:var(--cream-dim);font-size:13px;flex:none}
+.murow .meta.miss{color:var(--err);font-weight:700}
+input[type=range]{accent-color:var(--gold);width:100%;padding:0;height:28px;cursor:pointer}
+
 /* match card two-column */
 .match{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 .match .colhead{font-family:'Playfair Display',serif;font-weight:800;font-size:17px;margin-bottom:10px}
@@ -200,6 +208,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       <span class="pill good" v-if="beatOk"><span class="led" style="background:var(--brick)"></span>On air <b style="text-transform:capitalize">{{ st.scene }}</b><span v-if="seqInfo">· {{ seqInfo.name }}</span></span>
       <span class="pill" :class="st && st.confidence === 'good' ? 'good' : 'warn'" v-if="beatOk">
         <span class="led"></span>Detection <b>{{ st.detected }}</b><span>({{ st.confidence }})</span></span>
+      <span class="pill" :class="musicPill.cls" v-if="musicPill"><span class="led"></span>Music <b>{{ musicPill.label }}</b></span>
     </div>
 
     <!-- persistent operator indicator: demo_mode puts fake players on the display -->
@@ -557,6 +566,75 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     </div>
   </section>
 
+  <!-- ============================ MUSIC ============================ -->
+  <section v-if="cfg" v-show="tab === 'music'">
+    <div class="card">
+      <h2>Background music</h2>
+      <p class="sub">A looping music bed played by the display page itself, so OBS hears it through the browser source — nothing plays in the room and no microphone is involved. In OBS enable <b>Control audio via OBS</b> on the overlay source and set its level in the audio mixer (monitoring off). These controls act immediately; the library below saves like any other tab.</p>
+
+      <div class="btns" style="margin-bottom:14px">
+        <button class="primary" v-if="!cfg.music.enabled" @click="setMusicEnabled(true)">▶ Play</button>
+        <button class="cancelbtn" v-else @click="setMusicEnabled(false)">■ Stop</button>
+        <button :disabled="!cfg.music.enabled" @click="skipMusic">⏭ Next track</button>
+        <button :disabled="!cfg.music.shuffle" @click="reshuffleMusic" title="Deal a new shuffled order">🔀 Reshuffle</button>
+      </div>
+
+      <div class="frm">
+        <div class="f wide"><label>Volume — {{ musicVolShown }}%</label>
+          <input type="range" min="0" max="100" step="1" :value="musicVolShown" @input="setMusicVolume($event.target.value)">
+        </div>
+        <div class="f wide">
+          <label class="chk" style="text-transform:none;letter-spacing:0">
+            <input type="checkbox" :checked="cfg.music.shuffle" @change="setMusicShuffle($event.target.checked)">
+            Shuffled order
+            <small>&nbsp;— the rotation is shuffled <b>once</b> and looped in full, so nothing repeats until every track has played. Reshuffle deals a new order; the order survives display reloads.</small>
+          </label>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:12px">Now: <b>{{ musicNowLabel }}</b></p>
+    </div>
+
+    <div class="card">
+      <h2>Library</h2>
+      <p class="sub">Files live in <code>assets/music/</code> (mp3, m4a, aac, ogg, opus, wav, flac) — upload here, or drop them into the folder and Rescan. Ticked tracks are in the rotation once saved. Stream-safe sources for classical and lo-fi are listed in the README — check the licence before airing anything.</p>
+      <div class="btns" style="margin-bottom:12px">
+        <button class="ghost" @click="pickUpload('music')">Upload audio…</button>
+        <button class="ghost" @click="rescanMusic(true)">Rescan folder</button>
+      </div>
+      <div class="rows">
+        <div class="murow" v-for="t in drafts.music.tracks" :key="t.file">
+          <input type="checkbox" v-model="t.enabled" title="In the rotation">
+          <span class="nm" :title="t.file">{{ t.file }}</span>
+          <span class="meta" :class="{miss: !musicOnDisk(t.file)}">{{ musicFileMeta(t.file) }}</span>
+          <button class="rowdel" @click="deleteMusicFile(t)"
+                  :title="musicOnDisk(t.file) ? 'Delete the file from assets/music/' : 'Remove this missing entry (Save to keep it gone)'">✕</button>
+        </div>
+        <p class="hint" v-if="!drafts.music.tracks.length">No audio yet — upload files above, or drop them into <code>assets/music/</code> and Rescan.</p>
+      </div>
+
+      <h3>Playback</h3>
+      <div class="frm">
+        <div class="f"><label>Fade</label><div class="unit"><input type="number" min="0" max="10" step="0.1" v-model="drafts.music.fade_s"><span>s on start / stop / ducking</span></div></div>
+        <div class="f wide">
+          <label class="chk" style="text-transform:none;letter-spacing:0">
+            <input type="checkbox" v-model="drafts.music.pause_iv">
+            Pause while the intermission video plays with sound
+            <small>&nbsp;— a muted video, or the “Back shortly” card, keeps the music going</small>
+          </label>
+        </div>
+      </div>
+
+      <div class="savebar">
+        <span class="errmsg" v-if="errs.music">{{ errs.music }}</span>
+        <span class="dirty" v-else-if="dirty.music">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.music">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.music" @click="revert('music')">Revert</button>
+        <button class="primary" :disabled="!dirty.music || saving" @click="saveMusic">Save music</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ======================= SPONSORS & ZONES ======================= -->
   <section v-if="cfg" v-show="tab === 'zones'">
     <div class="card">
@@ -810,6 +888,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
 
   <input type="file" id="upSponsors" accept=".png,.jpg,.jpeg,.webp,.gif,.svg" style="display:none" @change="onUpload('sponsors', $event)">
   <input type="file" id="upPlayers" accept=".png,.jpg,.jpeg,.webp,.gif,.svg" style="display:none" @change="onUpload('players', $event)">
+  <input type="file" id="upMusic" accept=".mp3,.m4a,.aac,.ogg,.opus,.wav,.flac" multiple style="display:none" @change="onUpload('music', $event)">
 
   <div class="toasts"><div class="toast" v-for="t in toasts" :key="t.id" :class="{err: t.kind==='err'}">{{ t.msg }}</div></div>
 </div>
@@ -840,6 +919,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     { id: "board", label: "Board" },
     { id: "transitions", label: "Transitions" },
     { id: "intermission", label: "Intermission" },
+    { id: "music", label: "Music" },
     { id: "zones", label: "Sponsors & Zones" },
     { id: "players", label: "Players" },
     { id: "pairingsman", label: "Pairingsman" },
@@ -880,6 +960,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
     return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
   }
+  const fmtBytes = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.ceil(n / 1024) + " KB";
 
   async function getJSON(url) {
     const r = await fetch(url, { cache: "no-store" });
@@ -1055,10 +1136,21 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     };
   }
 
+  function draftMusic(c) {
+    const m = c.music || {};
+    return {
+      tracks: (Array.isArray(m.tracks) ? m.tracks : [])
+        .filter(t => t && t.file)
+        .map(t => ({ file: String(t.file), enabled: t.enabled !== false })),
+      fade_s: (Number(m.fade_ms) || 0) / 1000,
+      pause_iv: m.pause_in_intermission !== false,
+    };
+  }
+
   const DRAFTERS = {
     event: draftEvent, board: draftBoard, trans: draftTrans, inter: draftInter, match: draftMatch,
     sponsors: draftSponsors, zones: draftZones, funder: draftFunder, roster: draftRoster,
-    pm: draftPairingsman,
+    pm: draftPairingsman, music: draftMusic,
   };
 
   /* ------------------------------------------------------------ state */
@@ -1072,14 +1164,14 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     tab: "live",
     saving: false,
     videos: [],
-    assets: { sponsors: [], players: [] },
+    assets: { sponsors: [], players: [], music: null },   // music: null = not listed yet (no false "missing")
     pmPreview: null,                     // { status, data?, at? } — Pairingsman tab preview
   });
   const drafts = reactive({ event: null, board: null, trans: null, inter: null, match: null,
-    sponsors: null, zones: null, funder: null, roster: null, pm: null, result: "" });
+    sponsors: null, zones: null, funder: null, roster: null, pm: null, music: null, result: "" });
   const baselines = reactive({ event: "", board: "", trans: "", inter: "", match: "",
-    sponsors: "", zones: "", funder: "", roster: "", pm: "" });
-  const errs = reactive({ event: "", board: "", trans: "", inter: "" });
+    sponsors: "", zones: "", funder: "", roster: "", pm: "", music: "" });
+  const errs = reactive({ event: "", board: "", trans: "", inter: "", music: "" });
   const toasts = reactive([]);
   let toastId = 0;
 
@@ -1139,30 +1231,143 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   }
 
   function pickUpload(kind) {
-    document.getElementById(kind === "sponsors" ? "upSponsors" : "upPlayers").click();
+    const ids = { sponsors: "upSponsors", players: "upPlayers", music: "upMusic" };
+    document.getElementById(ids[kind]).click();
   }
 
   async function onUpload(kind, ev) {
-    const f = ev.target.files && ev.target.files[0];
+    const files = Array.from(ev.target.files || []);   // music input is `multiple`
     ev.target.value = "";
-    if (!f) return;
+    if (!files.length) return;
+    for (const f of files) {
+      try {
+        const data = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(String(r.result).split(",")[1] || "");
+          r.onerror = () => rej(new Error("could not read the file"));
+          r.readAsDataURL(f);
+        });
+        const r = await fetch("/api/asset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind, filename: f.name, data }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.ok) throw new Error(j.error || "upload failed");
+        toast("Uploaded " + j.name + (kind === "music" ? " — Save music to keep it in the rotation" : " — pick it in a row below"));
+      } catch (e) { toast("Upload failed — " + f.name + ": " + e.message, "err"); }
+    }
+    if (kind === "music") await rescanMusic(false);
+    else loadAssets(kind, false);
+  }
+
+  /* --------------------------------------------------------- music library
+     The library list is the draft; files found on disk but absent from it
+     are merged in (ticked) on every rescan/tab visit, then Save persists.
+     Instant playback controls write music.json directly, touching only
+     their own keys, so unsaved library edits are never clobbered.        */
+
+  async function rescanMusic(announce) {
+    await loadAssets("music", announce);
+    if (!drafts.music || !Array.isArray(state.assets.music)) return;
+    const have = new Set(drafts.music.tracks.map(t => t.file));
+    for (const f of state.assets.music) {
+      if (!have.has(f.name)) drafts.music.tracks.push({ file: f.name, enabled: true });
+    }
+    drafts.music.tracks.sort((a, b) => a.file.localeCompare(b.file));
+  }
+
+  const musicOnDisk = (file) =>
+    state.assets.music == null ? true : state.assets.music.some(x => x.name === file);
+  const musicFileMeta = (file) => {
+    if (state.assets.music == null) return "";
+    const f = state.assets.music.find(x => x.name === file);
+    return f ? fmtBytes(f.size) : "missing — not in assets/music/";
+  };
+
+  async function mutateMusic(fn, okMsg) {
     try {
-      const data = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(String(r.result).split(",")[1] || "");
-        r.onerror = () => rej(new Error("could not read the file"));
-        r.readAsDataURL(f);
-      });
-      const r = await fetch("/api/asset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, filename: f.name, data }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.ok) throw new Error(j.error || "upload failed");
-      toast("Uploaded " + j.name + " — pick it in a row below");
-      loadAssets(kind, false);
-    } catch (e) { toast("Upload failed — " + e.message, "err"); }
+      const c = await freshConfig();
+      fn(c.music, c);
+      await postConfig("music", c.music);
+      state.cfg = c;                     // snappy UI; poll reconciles anyway
+      if (okMsg) toast(okMsg);
+    } catch (e) {
+      toast("Music command failed — " + e.message, "err");
+    }
+  }
+
+  const setMusicEnabled = (on) => mutateMusic(m => { m.enabled = !!on; },
+    on ? "Music on — the display fades the bed in" : "Music off");
+  const setMusicShuffle = (on) => mutateMusic(m => { m.shuffle = !!on; },
+    on ? "Shuffled order on — one order, looped in full" : "List order (alphabetical)");
+  const reshuffleMusic = () => mutateMusic(m => {
+    m.shuffle = true;
+    m.shuffle_seed = ((Number(m.shuffle_seed) || 0) % 1e9) + 1;
+  }, "New shuffle order dealt");
+  const skipMusic = () => mutateMusic(m => {
+    m.skip_count = ((Number(m.skip_count) || 0) % 1e9) + 1;
+  }, "Skipping to the next track");
+
+  // Volume: live slider, debounced write. pendingVol keeps the thumb where
+  // the operator put it until the write (and the optimistic cfg) catch up.
+  const pendingVol = ref(null);
+  let volTimer = null;
+  function setMusicVolume(v) {
+    const n = Math.max(0, Math.min(100, Math.round(Number(v) || 0)));
+    pendingVol.value = n;
+    clearTimeout(volTimer);
+    volTimer = setTimeout(async () => {
+      await mutateMusic(m => { m.volume = n; });
+      if (pendingVol.value === n) pendingVol.value = null;
+    }, 250);
+  }
+
+  async function saveMusic() {
+    errs.music = "";
+    const d = drafts.music;
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        c.music.tracks = d.tracks.map(t => ({ file: t.file, enabled: !!t.enabled }));
+        c.music.fade_ms = Math.round(toNum(d.fade_s, 0.8, 0, 10) * 1000);
+        c.music.pause_in_intermission = !!d.pause_iv;
+        await postConfig("music", c.music);  // enabled/volume/shuffle/seed/skip ride through fresh
+        state.cfg = c; rebuildDraft("music", true);
+        toast("Music library saved");
+      } catch (e) { errs.music = e.message; }
+    });
+  }
+
+  // Delete = one click, consistent state: remove the file, drop its row from
+  // the SAVED list (other unsaved edits stay), and fix the draft + baseline
+  // in place so only the operator's real edits still read as dirty.
+  async function deleteMusicFile(t) {
+    const onDisk = musicOnDisk(t.file);
+    if (onDisk && !confirm("Delete “" + t.file + "” from assets/music/? The display skips to the next track if it is playing.")) return;
+    try {
+      if (onDisk) {
+        const r = await fetch("/api/asset/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: "music", name: t.file }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.ok) throw new Error(j.error || "delete failed");
+        const c = await freshConfig();
+        c.music.tracks = (c.music.tracks || []).filter(x => x.file !== t.file);
+        await postConfig("music", c.music);
+        state.cfg = c;
+      }
+      const i = drafts.music.tracks.findIndex(x => x.file === t.file);
+      if (i >= 0) drafts.music.tracks.splice(i, 1);
+      const b = JSON.parse(baselines.music || "null");
+      if (b) {
+        b.tracks = b.tracks.filter(x => x.file !== t.file);
+        baselines.music = JSON.stringify(b);
+      }
+      if (onDisk) { loadAssets("music", false); toast("Deleted " + t.file); }
+    } catch (e) { toast("Delete failed — " + e.message, "err"); }
   }
 
   /* --------------------------------------------------- scene commands
@@ -1708,11 +1913,47 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         if (id === "board") return dirty.value.board;
         if (id === "transitions") return dirty.value.trans;
         if (id === "intermission") return dirty.value.inter;
+        if (id === "music") return dirty.value.music;
         if (id === "zones") return dirty.value.sponsors || dirty.value.zones || dirty.value.funder;
         if (id === "players") return dirty.value.roster;
         if (id === "pairingsman") return dirty.value.pm;
         return false;
       };
+
+      /* ---- music tab: live readouts ---- */
+      const musicVolShown = computed(() =>
+        pendingVol.value != null ? pendingVol.value
+          : state.cfg ? toNum(state.cfg.music.volume, 50, 0, 100) : 50);
+      const musicNowLabel = computed(() => {
+        const m = state.cfg && state.cfg.music;
+        if (!m) return "—";
+        if (!beatOk.value) return "no display connected — nothing plays until one is";
+        const mu = state.st.music;
+        if (!mu) return m.enabled ? "display is running an old build — reload the OBS browser source" : "off";
+        const which = mu.file ? mu.index + "/" + mu.of + " — " + mu.file : "";
+        const pos = mu.dur_s ? fmtClock(mu.pos_s) + " / " + fmtClock(mu.dur_s) : "";
+        return ({
+          off: m.enabled ? "waiting — no tracks in the rotation (tick some below and Save music)" : "off",
+          playing: ["playing", which, pos].filter(Boolean).join("  ·  "),
+          paused: "paused — the intermission video has the air",
+          blocked: "blocked — that browser refused autoplay. OBS plays fine; in a test tab, click the display page once.",
+          error: "every track failed to play — check the files in assets/music/",
+        })[mu.state] || mu.state;
+      });
+      const musicPill = computed(() => {
+        const m = state.cfg && state.cfg.music;
+        if (!m || !m.enabled) return null;
+        const mu = beatOk.value && state.st.music;
+        if (!mu) return { cls: "warn", label: "on — no display" };
+        const short = mu.file && mu.file.length > 26 ? mu.file.slice(0, 24) + "…" : mu.file;
+        return ({
+          playing: { cls: "good", label: short || "playing" },
+          paused: { cls: "warn", label: "paused (intermission)" },
+          blocked: { cls: "down", label: "blocked in browser" },
+          error: { cls: "down", label: "files unplayable" },
+          off: { cls: "warn", label: "no tracks" },
+        })[mu.state] || { cls: "warn", label: mu.state };
+      });
 
       /* ---- zones tab: per-scene availability context ---- */
       const zoneScene = ref("game");
@@ -1751,11 +1992,11 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         if (s >= 90) return Math.floor(s / 60) + "m " + Math.round(s % 60) + "s";
         return (s >= 10 ? Math.round(s) : s.toFixed(1)) + "s";
       }
-      const fmtBytes = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.ceil(n / 1024) + " KB";
 
       function switchTab(id) {
         state.tab = id;
         if (id === "intermission") loadVideos(false);
+        if (id === "music") rescanMusic(false);
         if (id === "zones") loadAssets("sponsors", false);
         if (id === "players") loadAssets("players", false);
         if (id === "pairingsman" && !state.pmPreview) fetchPmPreview();
@@ -1780,6 +2021,9 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         zoneScene, stripOn, colDimmed, colSlotIds, slotLabel, activeSlotCount,
         setStrip, saveSponsors, saveZones, saveFunder, saveRoster, assignSide,
         pickUpload, onUpload, loadAssets,
+        setMusicEnabled, setMusicShuffle, reshuffleMusic, skipMusic, setMusicVolume,
+        musicVolShown, musicNowLabel, musicPill, rescanMusic, saveMusic,
+        deleteMusicFile, musicOnDisk, musicFileMeta,
         PM_FIELDS, PM_LABELS, pmStatusLabel, pmPreview, pmPulled, pmManual,
         savePairingsman, fetchPmPreview,
       };

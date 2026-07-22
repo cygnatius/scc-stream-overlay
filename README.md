@@ -12,10 +12,12 @@ server.js            zero-dependency local server (node http/fs/path only)
                      binds 127.0.0.1:8420 — never exposed to the network
 public/display.html  the OBS browser source (1920×1080)
 public/admin.html    the operator control panel (open in a normal browser)
-public/js/           modules: config, board, clock, moves, livechess, scenes, zones
+public/js/           modules: config, board, clock, moves, livechess, pgn,
+                     pairingsman, scenes, zones, music
 config/*.json        all settings; written by the admin page, hot-reloaded
                      by the display within ~half a second (gitignored)
-assets/              sponsor logos, player photos, intermission video, club art
+assets/              sponsor logos, player photos, intermission video,
+                     background music, club art
 vendor/              Vue 3, chess.js 0.10.3, fonts — fully vendored
 start-overlay.bat    double-click launcher; prints the two URLs
 ```
@@ -48,6 +50,41 @@ operating the admin page: **SCC-Overlay-Manual-Setup.md**.
   the admin Pairingsman tab, every field switchable auto / manual / hidden).
   The overlay is fully operable with Pairingsman absent — auto degrades to
   the manual values whenever the payload is null or unreachable.
+
+## Background music
+
+The display can play a looping music bed (Admin → **Music**): upload audio
+files there (or drop them into `assets/music/` and Rescan), tick the tracks
+you want in the rotation, **Save music**, then press **Play**. Shuffle deals
+**one** seeded order and loops over it in full — nothing repeats until the
+whole library has played — and the order survives display reloads;
+**Reshuffle** deals a new order. Volume, **Next track** and play/stop act
+immediately, and the bed pauses by itself while an intermission video plays
+with sound. Formats: mp3, m4a, aac, ogg, opus, wav, flac.
+
+**How OBS hears it:** the display page itself plays the audio, so it arrives
+through the OBS **browser source** — tick **"Control audio via OBS"** on the
+overlay source and balance it in the OBS audio mixer (leave monitoring off).
+Nothing plays out of the venue speakers and no microphone is involved. If a
+second copy of the display is ever added as another OBS source, put
+`?music=0` on that copy's URL so the bed isn't doubled into the mix.
+
+**Finding stream-safe music** — the repo ships none, deliberately. Classical
+*compositions* are public domain, but most commercial *recordings* of them
+are not, and platform content-ID flags those within minutes. Build the
+library from places that licence the recording itself:
+
+- **Musopen** — [musopen.org](https://musopen.org) — public-domain / CC
+  classical recordings; check the licence shown on each recording.
+- **Pixabay Music** — [pixabay.com/music](https://pixabay.com/music/) —
+  royalty-free classical and lo-fi, no attribution required.
+- **Free Music Archive** — [freemusicarchive.org](https://freemusicarchive.org)
+  — filter to CC0 / CC-BY.
+- **Kevin MacLeod** — [incompetech.com](https://incompetech.com) — huge CC-BY
+  catalogue; credit him in the stream description.
+
+Keep a note of where each file came from, and prefer CC0 / public-domain
+recordings for the quietest life on Twitch and YouTube.
 
 ## The legacy single file
 

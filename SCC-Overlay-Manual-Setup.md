@@ -43,6 +43,16 @@ one. Chapters (time offsets) make the "back from break" resume start from the
 chapter that was interrupted, so the whole video eventually airs; exact /
 rewind / restart modes are there too.
 
+**Music tab** — the looping background bed. Upload audio files (or drop them
+into `assets/music/` and Rescan), tick the ones for the rotation, **Save
+music**, press **Play**. Play/stop, volume, **Next track** and **Reshuffle**
+act immediately — no save needed. Shuffle plays one fixed shuffled order in
+full before it repeats; Reshuffle deals a new order. The bed pauses by itself
+while an intermission video plays with sound, and the "Now:" line (plus the
+Music pill up top) shows exactly what the display is playing. OBS must have
+**"Control audio via OBS"** ticked on the overlay source (see the setup doc) —
+the music then rides the browser source into the mixer, with the room silent.
+
 ---
 
 ## During the broadcast — the Live tab

@@ -608,6 +608,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 <script src="/js/pairingsman.js"></script>
 <script src="/js/scenes.js"></script>
 <script src="/js/zones.js"></script>
+<script src="/js/music.js"></script>
 
 <!-- zone slot card template (see the zone-card component in the boot script) -->
 <script type="text/x-template" id="tpl-zone-card">
@@ -671,6 +672,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
   SCC.zones.init(cfg);
   SCC.pgn.init(game, cfg);
   SCC.pairingsman.init(cfg);
+  SCC.music.init(cfg);          // background bed; ?music=0 keeps a second instance silent
 
   /* Field tri-state (stage 6): hidden → nothing; auto → the Pairingsman
      value when present, else the manual value (null = not available, per
