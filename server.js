@@ -204,6 +204,22 @@ const CONFIG_DEFAULTS = {
     pause_in_intermission: true,         // duck out while the intermission video plays unmuted
     tracks: [],                          // [{ file, enabled }] — files in assets/music; list order = play order when shuffle is off
   },
+
+  effects: {
+    enabled: false,                      // master switch — result cues are strictly opt-in
+    featured_result: {                   // the streamed game's result landing (postgame scene)
+      visual: true,                      // result text pops on reveal / change
+      sound: "chime",                    // "" | chime | bell | blip (built-in synth) | file:<assets/sfx name>
+      volume: 70,                        // 0–100
+    },
+    other_results: {                     // data zones changing content (Pairingsman or manual lines)
+      visual: true,                      // zone card pulses; changed lines glow
+      sound: "blip",
+      volume: 45,
+    },
+    test_count: 0,                       // admin test-fire nudge; the display acts on change
+    test_event: "featured_result",       // featured_result | other_results
+  },
 };
 
 const CONFIG_NAMES = Object.keys(CONFIG_DEFAULTS);
@@ -316,12 +332,12 @@ const MIME = {
 const IMAGE_EXT = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"];
 const VIDEO_EXT = [".mp4", ".webm", ".ogv", ".mov"];
 const AUDIO_EXT = [".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"];
-const ASSET_KINDS = { sponsors: IMAGE_EXT, players: IMAGE_EXT, video: VIDEO_EXT, music: AUDIO_EXT };
-const UPLOAD_KINDS = ["sponsors", "players", "music"]; // videos are placed manually
+const ASSET_KINDS = { sponsors: IMAGE_EXT, players: IMAGE_EXT, video: VIDEO_EXT, music: AUDIO_EXT, sfx: AUDIO_EXT };
+const UPLOAD_KINDS = ["sponsors", "players", "music", "sfx"]; // videos are placed manually
 // Music files dwarf photos (a full classical movement can pass 20 MB), and
 // base64 inflates the body by a third again — give /api/asset its own limit.
 const ASSET_MAX_BODY = 64 * 1024 * 1024;
-const DELETE_KINDS = ["music"];                        // admin-managed library; images stay manual
+const DELETE_KINDS = ["music", "sfx"];                 // admin-managed libraries; images stay manual
 
 /* --------------------------------------------------------------- respond */
 

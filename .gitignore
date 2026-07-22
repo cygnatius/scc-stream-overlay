@@ -7,11 +7,12 @@ config.local.json
 config/*.json
 
 # Venue media dropped in by the operator (sponsor logos, player photos,
-# videos, background music)
+# videos, background music, effect sounds)
 assets/sponsors/*
 assets/players/*
 assets/video/*
 assets/music/*
+assets/sfx/*
 
 # Your own filled-in working copies (keep the tracked overlays clean)
 *.local.html
@@ -30,3 +31,4 @@ desktop.ini
 !assets/players/.gitkeep
 !assets/video/.gitkeep
 !assets/music/.gitkeep
+!assets/sfx/.gitkeep

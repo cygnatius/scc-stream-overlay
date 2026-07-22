@@ -355,6 +355,7 @@ SCC.scenes = (function () {
             ? { status: SCC.pairingsman.state.status, entity: SCC.pairingsman.state.entity, fetched_at: SCC.pairingsman.state.fetchedAt }
             : null,
           music: window.SCC.music ? SCC.music.status() : null,
+          effects: window.SCC.effects ? SCC.effects.status() : null,
         }),
       });
     } catch (e) { /* server down — heartbeat resumes when it returns */ }

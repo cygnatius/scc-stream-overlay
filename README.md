@@ -86,6 +86,18 @@ library from places that licence the recording itself:
 Keep a note of where each file came from, and prefer CC0 / public-domain
 recordings for the quietest life on Twitch and YouTube.
 
+## Result effects
+
+Optional cues when results land (same tab, **Music & FX**, off by default):
+the featured game's result **pops** on the postgame scene, and the data
+zones (results / standings / pairings, Pairingsman auto or manual lines)
+**pulse** when their content changes, changed lines glowing gold. Each event
+can also play a sound — built-in synthesised cues (chime, bell, soft blip)
+that need **no files at all**, or a short custom one-shot dropped into
+`assets/sfx/`. Sounds ride the browser source exactly like the music, so
+OBS hears them with the room silent; admin has a local **Preview** per
+sound and **Test** buttons that fire the saved cues on the display.
+
 ## The legacy single file
 
 `scc-stream-overlay.html` at the repo root is the previous self-contained

@@ -34,6 +34,7 @@ SCC.config = (function () {
                    refresh_ms: 30000, fields: {} },
     music: { enabled: false, volume: 50, shuffle: true, shuffle_seed: 1,
              skip_count: 0, fade_ms: 800, pause_in_intermission: true, tracks: [] },
+    effects: { enabled: false, featured_result: {}, other_results: {}, test_count: 0 },
   };
 
   const store = Vue.reactive({
