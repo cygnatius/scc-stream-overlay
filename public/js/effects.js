@@ -169,7 +169,10 @@ SCC.effects = (function () {
   /* ----------------------------------------------------------- sources */
 
   // The result exactly as the display resolves it: hidden → nothing;
-  // auto → Pairingsman label when present, else manual; manual → manual.
+  // auto → Pairingsman value when present, else manual; manual → manual.
+  // pm.auto("result") is already the display label STRING (the adaptor
+  // unwraps result.label) — mirror fieldVal() in display.html verbatim so
+  // this celebrates precisely what goes on air.
   function resolvedResult() {
     const sc = (cfg.data.scenes.scenes || {}).postgame || {};
     const manual = sc.result_text || "";
@@ -179,7 +182,7 @@ SCC.effects = (function () {
     if (mode === "hidden") return "";
     if (mode === "auto") {
       const a = pm.auto("result");
-      if (a && a.label) return String(a.label);
+      if (a != null && a !== "") return String(a);
     }
     return manual;
   }

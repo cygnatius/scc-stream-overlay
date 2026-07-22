@@ -607,7 +607,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
           <span class="nm" :title="t.file">{{ t.file }}</span>
           <span class="meta" :class="{miss: !musicOnDisk(t.file)}">{{ musicFileMeta(t.file) }}</span>
           <button class="rowdel" @click="deleteMusicFile(t)"
-                  :title="musicOnDisk(t.file) ? 'Delete the file from assets/music/' : 'Remove this missing entry (Save to keep it gone)'">✕</button>
+                  :title="musicOnDisk(t.file) ? 'Delete the file from assets/music/' : 'Remove this missing entry'">✕</button>
         </div>
         <p class="hint" v-if="!drafts.music.tracks.length">No audio yet — upload files above, or drop them into <code>assets/music/</code> and Rescan.</p>
       </div>
@@ -1450,9 +1450,10 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     });
   }
 
-  // Delete = one click, consistent state: remove the file, drop its row from
-  // the SAVED list (other unsaved edits stay), and fix the draft + baseline
-  // in place so only the operator's real edits still read as dirty.
+  // Delete = one click, consistent state: remove the file (when it exists),
+  // drop its row from the SAVED list either way — a skipped config write
+  // would let the next poll rebuild resurrect the row — and fix the draft +
+  // baseline in place so only the operator's real edits still read as dirty.
   async function deleteMusicFile(t) {
     const onDisk = musicOnDisk(t.file);
     if (onDisk && !confirm("Delete “" + t.file + "” from assets/music/? The display skips to the next track if it is playing.")) return;
@@ -1465,11 +1466,11 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         });
         const j = await r.json().catch(() => ({}));
         if (!r.ok || !j.ok) throw new Error(j.error || "delete failed");
-        const c = await freshConfig();
-        c.music.tracks = (c.music.tracks || []).filter(x => x.file !== t.file);
-        await postConfig("music", c.music);
-        state.cfg = c;
       }
+      const c = await freshConfig();
+      c.music.tracks = (c.music.tracks || []).filter(x => x.file !== t.file);
+      await postConfig("music", c.music);
+      state.cfg = c;
       const i = drafts.music.tracks.findIndex(x => x.file === t.file);
       if (i >= 0) drafts.music.tracks.splice(i, 1);
       const b = JSON.parse(baselines.music || "null");
@@ -1477,7 +1478,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         b.tracks = b.tracks.filter(x => x.file !== t.file);
         baselines.music = JSON.stringify(b);
       }
-      if (onDisk) { loadAssets("music", false); toast("Deleted " + t.file); }
+      if (onDisk) loadAssets("music", false);
+      toast(onDisk ? "Deleted " + t.file : "Removed missing entry " + t.file);
     } catch (e) { toast("Delete failed — " + e.message, "err"); }
   }
 
