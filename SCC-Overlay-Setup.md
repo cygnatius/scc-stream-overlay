@@ -30,6 +30,9 @@ network and the tethered internet connection changing IP changes nothing.
    - **Width 1920, Height 1080**.
    - Leave **"Shutdown source when not visible" UNCHECKED** — scene
      transitions animate only while the source is rendered.
+   - Tick **"Control audio via OBS"** — the background music bed
+     (Admin → Music) then comes through the OBS audio mixer, where its level
+     is set. It never plays out of the PC speakers and needs no microphone.
 5. Open the admin URL in any browser on the same PC. You're set up.
 
 ---
@@ -88,6 +91,11 @@ to the normal single-machine setup.
 - **Demo banner showing in admin** → demo mode is on (fake players on the
   display). It's a design aid — turn it off before going live; it can never
   turn itself on.
+- **No music on the stream** → check the Music pill / Now line in admin
+  (Admin → Music): "blocked" only happens in a normal browser tab, never in
+  OBS; "no tracks" means nothing is ticked and saved; silence with
+  "playing" showing means "Control audio via OBS" isn't ticked on the
+  browser source, or its mixer fader is down.
 
 ---
 

@@ -13,6 +13,7 @@
      GET  /api/config/hash   → just the hash (cheap; display polls this)
      POST /api/config/:name  → replace one config file (validated, atomic write)
      POST /api/asset         → { kind, filename, data(base64) } → assets/<kind>/
+     POST /api/asset/delete  → { kind, name } — music library only
      GET  /api/assets/:kind  → list files in assets/<kind> (video picker etc.)
    ========================================================================= */
 "use strict";
@@ -192,6 +193,33 @@ const CONFIG_DEFAULTS = {
     refresh_ms: 30000,                   // live-data refresh; independent of config poll
     fields: {},                          // per-field auto | manual | hidden
   },
+
+  music: {
+    enabled: false,                      // master switch — the display plays only while true
+    volume: 50,                          // 0–100 on the display's audio element
+    shuffle: true,                       // ONE seeded order, looped — never a per-track random pick
+    shuffle_seed: 1,                     // Reshuffle bumps this; same seed = same order across reloads
+    skip_count: 0,                       // admin Next-track nudge; the display advances on change
+    fade_ms: 800,                        // fade on start/stop/scene ducking
+    pause_in_intermission: true,         // duck out while the intermission video plays unmuted
+    tracks: [],                          // [{ file, enabled }] — files in assets/music; list order = play order when shuffle is off
+  },
+
+  effects: {
+    enabled: false,                      // master switch — result cues are strictly opt-in
+    featured_result: {                   // the streamed game's result landing (postgame scene)
+      visual: true,                      // result text pops on reveal / change
+      sound: "chime",                    // "" | chime | bell | blip (built-in synth) | file:<assets/sfx name>
+      volume: 70,                        // 0–100
+    },
+    other_results: {                     // data zones changing content (Pairingsman or manual lines)
+      visual: true,                      // zone card pulses; changed lines glow
+      sound: "blip",
+      volume: 45,
+    },
+    test_count: 0,                       // admin test-fire nudge; the display acts on change
+    test_event: "featured_result",       // featured_result | other_results
+  },
 };
 
 const CONFIG_NAMES = Object.keys(CONFIG_DEFAULTS);
@@ -290,14 +318,26 @@ const MIME = {
   ".webm": "video/webm",
   ".ogv": "video/ogg",
   ".mov": "video/quicktime",
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".ogg": "audio/ogg",
+  ".opus": "audio/opus",
+  ".wav": "audio/wav",
+  ".flac": "audio/flac",
   ".txt": "text/plain; charset=utf-8",
   ".map": "application/json",
 };
 
 const IMAGE_EXT = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"];
 const VIDEO_EXT = [".mp4", ".webm", ".ogv", ".mov"];
-const ASSET_KINDS = { sponsors: IMAGE_EXT, players: IMAGE_EXT, video: VIDEO_EXT };
-const UPLOAD_KINDS = ["sponsors", "players"];          // videos are placed manually
+const AUDIO_EXT = [".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"];
+const ASSET_KINDS = { sponsors: IMAGE_EXT, players: IMAGE_EXT, video: VIDEO_EXT, music: AUDIO_EXT, sfx: AUDIO_EXT };
+const UPLOAD_KINDS = ["sponsors", "players", "music", "sfx"]; // videos are placed manually
+// Music files dwarf photos (a full classical movement can pass 20 MB), and
+// base64 inflates the body by a third again — give /api/asset its own limit.
+const ASSET_MAX_BODY = 64 * 1024 * 1024;
+const DELETE_KINDS = ["music", "sfx"];                 // admin-managed libraries; images stay manual
 
 /* --------------------------------------------------------------- respond */
 
@@ -340,8 +380,9 @@ function serveStatic(req, res, root, urlPath) {
   const type = MIME[ext] || "application/octet-stream";
   const isVideo = VIDEO_EXT.includes(ext);
   // html/js/css/json: no-store so OBS and admin never run a stale overlay.
-  // Fonts/images barely change and are large-ish: allow a short cache.
-  const cache = isVideo || IMAGE_EXT.includes(ext) || ext === ".woff2" || ext === ".woff" || ext === ".ttf"
+  // Fonts/images/media barely change and are large-ish: allow a short cache.
+  const cache = isVideo || IMAGE_EXT.includes(ext) || AUDIO_EXT.includes(ext)
+    || ext === ".woff2" || ext === ".woff" || ext === ".ttf"
     ? "max-age=3600"
     : "no-store";
 
@@ -376,13 +417,14 @@ function serveStatic(req, res, root, urlPath) {
 
 /* ------------------------------------------------------------- API routes */
 
-function readBody(req, res, cb) {
+function readBody(req, res, cb, limit) {
+  const max = limit || MAX_BODY;
   const chunks = [];
   let size = 0;
   let aborted = false;
   req.on("data", (c) => {
     size += c.length;
-    if (size > MAX_BODY) {
+    if (size > max) {
       aborted = true;
       sendError(res, 413, "body too large");
       req.destroy();
@@ -580,7 +622,7 @@ function handleApi(req, res, pathname) {
     return sendJSON(res, 200, { ok: true, files });
   }
 
-  // POST /api/asset — { kind, filename, data } (base64). Sponsor logos & player photos only.
+  // POST /api/asset — { kind, filename, data } (base64). Logos, photos, music.
   if (req.method === "POST" && pathname === "/api/asset") {
     return readBody(req, res, (buf) => {
       let body;
@@ -594,10 +636,11 @@ function handleApi(req, res, pathname) {
       if (typeof filename !== "string" || !filename) return sendError(res, 400, "filename required");
       if (typeof data !== "string" || !data) return sendError(res, 400, "data (base64) required");
 
-      // Sanitize: basename only, safe charset, whitelisted image extension.
+      // Sanitize: basename only, safe charset, extension whitelisted per kind.
+      const exts = ASSET_KINDS[kind];
       const base = path.basename(filename).replace(/[^A-Za-z0-9._ -]/g, "_");
       const ext = path.extname(base).toLowerCase();
-      if (!IMAGE_EXT.includes(ext)) return sendError(res, 400, "extension must be one of: " + IMAGE_EXT.join(", "));
+      if (!exts.includes(ext)) return sendError(res, 400, "extension must be one of: " + exts.join(", "));
       let bytes;
       try {
         bytes = Buffer.from(data, "base64");
@@ -613,6 +656,35 @@ function handleApi(req, res, pathname) {
       }
       console.log(`[asset] ${kind}/${base} written (${bytes.length} bytes)`);
       return sendJSON(res, 200, { ok: true, name: base, url: `/assets/${kind}/${encodeURIComponent(base)}` });
+    }, ASSET_MAX_BODY);
+  }
+
+  // POST /api/asset/delete — { kind, name }. Music library only: the admin
+  // page manages that folder wholesale; images stay hand-managed on disk.
+  if (req.method === "POST" && pathname === "/api/asset/delete") {
+    return readBody(req, res, (buf) => {
+      let body;
+      try {
+        body = JSON.parse(buf.toString("utf8"));
+      } catch {
+        return sendError(res, 400, "invalid JSON");
+      }
+      const { kind, name } = body || {};
+      if (!DELETE_KINDS.includes(kind)) return sendError(res, 400, "kind must be one of: " + DELETE_KINDS.join(", "));
+      if (typeof name !== "string" || !name) return sendError(res, 400, "name required");
+      const base = path.basename(name);
+      const ext = path.extname(base).toLowerCase();
+      if (base !== name || !ASSET_KINDS[kind].includes(ext)) return sendError(res, 400, "bad name");
+      const file = path.join(ASSETS_DIR, kind, base);
+      try {
+        fs.unlinkSync(file);
+      } catch (e) {
+        if (e.code === "ENOENT") return sendError(res, 404, "no such file");
+        console.warn(`[asset] delete failed: ${e.message}`);
+        return sendError(res, 500, "delete failed");
+      }
+      console.log(`[asset] ${kind}/${base} deleted`);
+      return sendJSON(res, 200, { ok: true });
     });
   }
 
