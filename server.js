@@ -100,6 +100,15 @@ const CONFIG_DEFAULTS = {
     demo_mode: false,                    // true = show the built-in demo game (design aid).
                                          // Fake names must never reach air by accident.
     move_times: true,                    // per-move times beside each move in the list
+    // Desync recovery (see the header note in public/js/moves.js). A placement
+    // the move engine cannot explain is held; if it is a SETTLED position (not
+    // just pieces lifted off the board) and it persists this long, the engine
+    // adopts the board as truth and keeps the move list. Without this the board
+    // freezes on air for the rest of the game.
+    resync_ms: 4000,
+    deep_search: true,                   // spend a depth-3 search before resyncing
+    resync_token: 0,                     // admin bump = resync to the board now (keeps moves)
+    restart_token: 0,                    // admin bump = new game from the board (clears moves)
     pgn: {
       enabled: true,                     // probe LiveChess for the game PGN (times + verification)
       url: "",                           // explicit PGN URL; empty = probe candidates on the host
@@ -155,6 +164,20 @@ const CONFIG_DEFAULTS = {
 
   sponsors: {
     sponsors: [],                        // { name, tier, image, message, header, active }
+  },
+
+  // Commentary tickertape (see public/js/ticker.js). One message rolls at a
+  // time and the list loops. `generation` is bumped by a GRACEFUL save (the
+  // display swaps lists at the next cycle boundary); `force_token` by a
+  // FORCEFUL one (restart from the top immediately).
+  ticker: {
+    enabled: false,
+    messages: [],                        // { id, text, active }
+    speed_px_s: 90,                      // 60 = stately, 90 = default, 140 = brisk
+    prefix: "",                          // optional standing label, e.g. "COMMENTARY"
+    show_on: { start: true, versus: true, game: true, postgame: true, intermission: false, ending: true },
+    generation: 0,
+    force_token: 0,
   },
 
   zones: {

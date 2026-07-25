@@ -80,9 +80,15 @@ select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,va
   background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:32px}
 .chk{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--cream);cursor:pointer;user-select:none}
 .chk small{color:var(--cream-dim)}
-.unit{display:flex;align-items:center;gap:8px}
-.unit input{flex:1}
-.unit span{color:var(--cream-dim);font-size:13px;flex:none}
+/* Number field + unit hint. The hint used to be flex:none, so a long hint
+   ("ms (display ↔ this server; local disk only)") squeezed the input down to a
+   sliver you could not read the value in. Now the INPUT keeps a floor and the
+   hint is the part that gives way — it shrinks, wraps to the next line, and
+   never steals the field's width. */
+.unit{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.unit input{flex:0 0 110px;width:110px;min-width:110px;text-align:right;
+  font-variant-numeric:tabular-nums}
+.unit span{color:var(--cream-dim);font-size:13px;flex:1 1 120px;min-width:0}
 
 button{font:inherit;font-weight:700;letter-spacing:.05em;border:1px solid rgba(241,231,211,.25);
   background:var(--panel-2);color:var(--cream);border-radius:8px;padding:9px 17px;cursor:pointer}
@@ -133,6 +139,31 @@ button.rowdel:hover{border-color:var(--err);color:var(--err)}
 .ttable input,.ttable select{padding:6px 9px}
 .ttable .na{color:rgba(205,191,166,.4);font-size:13px}
 .pmcell{font-size:13px;color:var(--cream-dim);max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* live diagnostics block (board tracking) */
+.diagbox{margin-top:14px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:6px 14px}
+.diagbox .row{display:flex;justify-content:space-between;gap:16px;padding:7px 0;
+  border-bottom:1px solid rgba(241,231,211,.07);font-size:14px}
+.diagbox .row:last-child{border-bottom:none}
+.diagbox .k{color:var(--cream-dim);flex:none}
+.diagbox .v{text-align:right;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.diagbox .v.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--cream-dim)}
+.diagbox .v.ok{color:var(--ok)} .diagbox .v.warn{color:var(--gold)} .diagbox .v.bad{color:var(--err)}
+
+/* ticker message rows */
+.tkrow{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;
+  background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.tkrow.off{opacity:.5}
+.tkrow .num{color:var(--cream-dim);font-size:13px;font-variant-numeric:tabular-nums;min-width:18px}
+.tkrow input[type=text]{background:var(--panel);border-color:transparent}
+.tkrow input[type=text]:focus{border-color:var(--gold)}
+.tkpreview{margin-top:14px;background:var(--bg-deep);border:1px solid var(--line);border-radius:8px;
+  height:54px;display:flex;align-items:center;gap:14px;padding:0 16px;overflow:hidden}
+.tkpreview .lbl{flex:none;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--cream-dim)}
+.tkpreview .strip{position:relative;flex:1;min-width:0;height:100%;overflow:hidden}
+.tkpreview .msg{position:absolute;top:50%;white-space:nowrap;font-size:19px;color:var(--cream);
+  transform:translateY(-50%);animation:tkdemo linear infinite}
+@keyframes tkdemo{from{left:100%;transform:translate(0,-50%)}to{left:0;transform:translate(-100%,-50%)}}
 
 /* video picker */
 .vlist{display:flex;flex-direction:column;gap:8px}
@@ -387,7 +418,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       <div class="frm">
         <div class="f"><label>Board serial</label><input type="text" v-model="drafts.board.serialnr"></div>
         <div class="f"><label>LiveChess port</label><input type="number" min="1" max="65535" v-model="drafts.board.port"></div>
-        <div class="f"><label>Feed poll</label><div class="unit"><input type="number" min="200" step="100" v-model="drafts.board.poll_ms"><span>ms (eboards poll over the websocket)</span></div></div>
+        <div class="f"><label>Feed poll</label><div class="unit"><input type="number" min="200" step="100" v-model="drafts.board.poll_ms"><span>ms — how often the board is read. Default <b>800</b>. 500 feels snappier; under 400 just costs CPU.</span></div></div>
       </div>
       <h3>Manual host override (two-machine setup)</h3>
       <div class="frm">
@@ -426,6 +457,42 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         <div class="f"><label>PGN poll</label><div class="unit"><input type="number" min="2" step="1" v-model="drafts.board.pgn_poll_s" :disabled="!drafts.board.pgn_enabled"><span>s (slow by design)</span></div></div>
       </div>
       <p class="hint" style="margin-top:10px">PGN status: <b>{{ pgnStatusLabel }}</b><span v-if="st && st.pgn && st.pgn.source"> — source {{ st.pgn.source }}</span></p>
+
+      <h3>Board tracking &amp; recovery</h3>
+      <p class="sub">
+        The overlay rebuilds the moves from the piece positions the board reports. A position it
+        can't explain is normally a piece in someone's hand, so it holds the last good one and
+        waits. If instead the board has genuinely drifted out of step, it now adopts what is
+        physically there after the delay below and keeps the move list — before this, it held
+        forever and the board stopped mirroring reality for the rest of the game.
+      </p>
+      <div class="frm">
+        <div class="f"><label>Resync delay</label><div class="unit"><input type="number" min="1000" step="500" v-model="drafts.board.resync_ms"><span>ms before adopting a settled position it can't explain. Default <b>4000</b>. Don't go below ~2500 — slow castling would be mistaken for a desync.</span></div></div>
+        <div class="f wide">
+          <label class="chk" style="text-transform:none;letter-spacing:0">
+            <input type="checkbox" v-model="drafts.board.deep_search">
+            Search harder before giving up
+            <small>&nbsp;— tries to reconstruct up to three half-moves when polls were missed, so the notation survives a stall instead of just the board</small>
+          </label>
+        </div>
+      </div>
+
+      <div class="diagbox">
+        <div class="row"><span class="k">Tracking</span><span class="v" :class="boardDiag.cls">{{ boardDiag.label }}</span></div>
+        <div class="row"><span class="k">Moves recorded</span><span class="v">{{ beatOk ? st.moves : '—' }}</span></div>
+        <div class="row" v-if="boardDiag.d"><span class="k">Engine position</span><span class="v mono">{{ boardDiag.d.engine_placement || '—' }}</span></div>
+        <div class="row" v-if="boardDiag.d"><span class="k">Physical board</span><span class="v mono" :class="{bad: boardDiag.mismatch}">{{ boardDiag.d.board_placement || '—' }}</span></div>
+        <div class="row" v-if="boardDiag.d"><span class="k">Recoveries this session</span><span class="v">{{ boardDiag.d.resyncs }} automatic · {{ boardDiag.d.forced }} manual · {{ boardDiag.d.deep_hits }} gaps reconstructed · {{ boardDiag.d.unexplained }} positions held</span></div>
+      </div>
+      <div class="btns" style="margin-top:12px">
+        <button @click="bumpResync">Resync to the board now</button>
+        <button class="danger" @click="bumpRestart">New game from the board</button>
+      </div>
+      <p class="hint" style="margin-top:8px">
+        <b>Resync</b> keeps the move list and just corrects the position — use it the moment the board on screen stops matching the table.
+        <b>New game</b> clears the move list and starts fresh from the current pieces. Both act within one poll interval.
+      </p>
+
       <div class="savebar">
         <span class="errmsg" v-if="errs.board">{{ errs.board }}</span>
         <span class="dirty" v-else-if="dirty.board">Unsaved changes</span>
@@ -562,6 +629,81 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         <span class="grow"></span>
         <button class="ghost" :disabled="!dirty.inter" @click="revert('inter')">Revert</button>
         <button class="primary" :disabled="!dirty.inter || saving" @click="saveInter">Save intermission</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ TICKER ============================ -->
+  <section v-if="cfg" v-show="tab === 'ticker'">
+    <div class="card">
+      <h2>Commentary ticker</h2>
+      <p class="sub">
+        Messages roll along the bottom of the canvas, one at a time, and the list loops.
+        On the game scene the ticker uses the footer strip (nothing else moves); every other
+        scene gets a band across the bottom. Two ways to apply any change — add, edit or delete:
+      </p>
+      <div class="frm" style="margin-bottom:4px">
+        <div class="f wide">
+          <label class="chk" style="text-transform:none;letter-spacing:0">
+            <input type="checkbox" v-model="drafts.ticker.enabled"> Ticker on air
+          </label>
+        </div>
+      </div>
+
+      <h3>Messages</h3>
+      <div class="rows">
+        <div class="tkrow" :class="{off: m.active === false}" v-for="(m, i) in drafts.ticker.messages" :key="m.id">
+          <span class="num">{{ i + 1 }}</span>
+          <input type="text" v-model="m.text" placeholder="Type the commentary line…" @keyup.enter="saveTicker(false)">
+          <label class="chk" style="font-size:13px" :title="m.active === false ? 'Not shown' : 'Shown in the loop'">
+            <input type="checkbox" :checked="m.active !== false" @change="m.active = $event.target.checked"> on
+          </label>
+          <button class="rowdel" @click="drafts.ticker.messages.splice(i,1)" title="Remove this message">✕</button>
+        </div>
+        <div><button class="ghost" @click="addTickerMsg">+ Add message</button></div>
+      </div>
+
+      <div class="tkpreview" v-if="tickerPreview">
+        <span class="lbl">Preview</span>
+        <div class="strip"><div class="msg" :style="{animationDuration: tickerPreview.dur + 's'}">{{ tickerPreview.text }}</div></div>
+      </div>
+
+      <h3>Appearance</h3>
+      <div class="frm">
+        <div class="f"><label>Speed</label><div class="unit"><input type="number" min="20" max="400" step="10" v-model="drafts.ticker.speed_px_s"><span>px/sec — 60 stately, <b>90</b> default, 140 brisk</span></div></div>
+        <div class="f"><label>Standing label <span style="text-transform:none">(optional)</span></label><input type="text" v-model="drafts.ticker.prefix" placeholder="e.g. COMMENTARY"></div>
+      </div>
+
+      <h3>Scenes it appears on</h3>
+      <div class="frm">
+        <div class="f wide" style="flex-direction:row;flex-wrap:wrap;gap:18px">
+          <label class="chk" v-for="s in SCENES" :key="s" style="text-transform:capitalize">
+            <input type="checkbox" :checked="drafts.ticker.show_on[s] !== false"
+                   @change="drafts.ticker.show_on[s] = $event.target.checked"> {{ s }}
+          </label>
+        </div>
+      </div>
+
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.ticker">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.ticker">Changed on disk — saving overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.ticker" @click="revert('ticker')">Revert</button>
+        <button :disabled="saving" @click="saveTicker(false)">Save — take effect gracefully</button>
+        <button class="primary" :disabled="saving" @click="saveTicker(true)">Apply now — force</button>
+      </div>
+      <p class="hint">
+        <b>Gracefully</b> lets the message currently rolling finish, then picks up the new list — nothing on air jumps.
+        <b>Force</b> drops whatever is on screen and restarts from the top of the list immediately. Use it when the wrong line is showing.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>Say something now</h2>
+      <p class="sub">Types straight to air: the message is added to the top of the list and shown immediately, ahead of everything else.</p>
+      <div class="unit" style="flex-wrap:nowrap">
+        <input type="text" v-model="drafts.tickerFlash" placeholder="Straight to air…" style="flex:1 1 auto;min-width:0;text-align:left" @keyup.enter="flashTicker">
+        <button class="primary" style="flex:none" :disabled="!String(drafts.tickerFlash || '').trim() || saving" @click="flashTicker">Send to air</button>
       </div>
     </div>
   </section>
@@ -980,6 +1122,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     { id: "board", label: "Board" },
     { id: "transitions", label: "Transitions" },
     { id: "intermission", label: "Intermission" },
+    { id: "ticker", label: "Ticker" },
     { id: "music", label: "Music & FX" },
     { id: "zones", label: "Sponsors & Zones" },
     { id: "players", label: "Players" },
@@ -1071,6 +1214,26 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       pgn_enabled: p.enabled !== false,
       pgn_url: p.url || "",
       pgn_poll_s: (Number(p.poll_ms) || 6000) / 1000,
+      resync_ms: b.resync_ms ?? 4000,
+      deep_search: b.deep_search !== false,
+    };
+  }
+
+  function draftTicker(c) {
+    const t = c.ticker || {};
+    const on = t.show_on || {};
+    const show_on = {};
+    for (const s of SCENES) show_on[s] = on[s] !== false;
+    return {
+      enabled: !!t.enabled,
+      speed_px_s: t.speed_px_s ?? 90,
+      prefix: t.prefix || "",
+      show_on,
+      messages: (Array.isArray(t.messages) ? t.messages : []).map(m => ({
+        id: m.id || ("m" + Math.random().toString(36).slice(2, 9)),
+        text: String(m.text || ""),
+        active: m.active !== false,
+      })),
     };
   }
 
@@ -1224,7 +1387,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   const DRAFTERS = {
     event: draftEvent, board: draftBoard, trans: draftTrans, inter: draftInter, match: draftMatch,
     sponsors: draftSponsors, zones: draftZones, funder: draftFunder, roster: draftRoster,
-    pm: draftPairingsman, music: draftMusic, effects: draftEffects,
+    pm: draftPairingsman, music: draftMusic, effects: draftEffects, ticker: draftTicker,
   };
 
   /* ------------------------------------------------------------ state */
@@ -1242,9 +1405,10 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     pmPreview: null,                     // { status, data?, at? } — Pairingsman tab preview
   });
   const drafts = reactive({ event: null, board: null, trans: null, inter: null, match: null,
-    sponsors: null, zones: null, funder: null, roster: null, pm: null, music: null, effects: null, result: "" });
+    sponsors: null, zones: null, funder: null, roster: null, pm: null, music: null, effects: null,
+    ticker: null, tickerFlash: "", result: "" });
   const baselines = reactive({ event: "", board: "", trans: "", inter: "", match: "",
-    sponsors: "", zones: "", funder: "", roster: "", pm: "", music: "", effects: "" });
+    sponsors: "", zones: "", funder: "", roster: "", pm: "", music: "", effects: "", ticker: "" });
   const errs = reactive({ event: "", board: "", trans: "", inter: "", music: "" });
   const toasts = reactive([]);
   let toastId = 0;
@@ -1537,6 +1701,70 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   }, on ? "Bottom strip ON — game-scene zones relocate into the strip"
         : "Bottom strip OFF — game scene renders exactly as today");
 
+  /* ---- ticker: one save path, two doors -------------------------------
+     force=false bumps `generation` (the display swaps lists at the next cycle
+     boundary); force=true bumps `force_token` (restart from the top now).
+     Add / edit / delete all go through here, so either door applies any of
+     them. */
+  async function saveTicker(force) {
+    await saveGuard(async () => {
+      try {
+        const d = drafts.ticker;
+        const c = await freshConfig();
+        const t = c.ticker || {};
+        t.enabled = !!d.enabled;
+        t.speed_px_s = toNum(d.speed_px_s, 90, 20, 400);
+        t.prefix = String(d.prefix || "").trim();
+        t.show_on = Object.assign({}, t.show_on, d.show_on);
+        t.messages = d.messages
+          .filter(m => String(m.text || "").trim())
+          .map(m => ({ id: m.id, text: String(m.text).trim(), active: m.active !== false }));
+        t.generation = (Number(t.generation) || 0) + 1;
+        if (force) t.force_token = (Number(t.force_token) || 0) + 1;
+        await postConfig("ticker", t);
+        state.cfg = c; rebuildDraft("ticker", true);
+        toast(force ? "Ticker applied now — restarted from the top" : "Ticker saved — takes effect at the end of the current message");
+      } catch (e) { toast("Ticker save failed — " + e.message, "err"); }
+    });
+  }
+
+  function addTickerMsg() {
+    drafts.ticker.messages.push({ id: "m" + Math.random().toString(36).slice(2, 9), text: "", active: true });
+  }
+
+  // Straight to air: prepend and force. The operator's "say this NOW" button.
+  async function flashTicker() {
+    const text = String(drafts.tickerFlash || "").trim();
+    if (!text) return;
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        const t = c.ticker || {};
+        t.enabled = true;
+        t.messages = [{ id: "m" + Math.random().toString(36).slice(2, 9), text, active: true }]
+          .concat(Array.isArray(t.messages) ? t.messages : []);
+        t.generation = (Number(t.generation) || 0) + 1;
+        t.force_token = (Number(t.force_token) || 0) + 1;
+        await postConfig("ticker", t);
+        state.cfg = c; drafts.tickerFlash = ""; rebuildDraft("ticker", true);
+        toast("On air now: " + text);
+      } catch (e) { toast("Send failed — " + e.message, "err"); }
+    });
+  }
+
+  /* ---- board recovery commands (token bumps the display acts on) ------- */
+  async function bumpBoardToken(key, msg) {
+    try {
+      const c = await freshConfig();
+      c.board[key] = (Number(c.board[key]) || 0) + 1;
+      await postConfig("board", c.board);
+      state.cfg = c; rebuildDraft("board", true);
+      toast(msg);
+    } catch (e) { toast("Command failed — " + e.message, "err"); }
+  }
+  const bumpResync = () => bumpBoardToken("resync_token", "Resyncing to the physical board — move list kept");
+  const bumpRestart = () => bumpBoardToken("restart_token", "New game started from the board — move list cleared");
+
   async function setDemo(on) {
     try {
       const c = await freshConfig();
@@ -1602,6 +1830,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
           manual_host_override: !!d.manual_host_override,
           manual_host: String(d.manual_host).trim(),
           move_times: !!d.move_times,
+          resync_ms: toNum(d.resync_ms, 4000, 1000),
+          deep_search: !!d.deep_search,
           pgn: Object.assign({}, c.board.pgn, {
             enabled: !!d.pgn_enabled,
             url: String(d.pgn_url).trim(),
@@ -1983,6 +2213,35 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         };
       });
 
+      /* ---- board tracking diagnostics (from the display heartbeat) ---- */
+      const boardDiag = computed(() => {
+        const d = (state.st && state.st.board) || null;
+        if (!beatOk.value) return { d: null, label: "no display connected", cls: "bad", mismatch: false };
+        if (!d) return { d: null, label: "—", cls: "", mismatch: false };
+        const mismatch = !!(d.engine_placement && d.board_placement && d.engine_placement !== d.board_placement);
+        const secs = (d.held_ms / 1000).toFixed(1);
+        const map = {
+          "no board": { label: "no board data yet", cls: "warn" },
+          synced: { label: "in step with the board", cls: "ok" },
+          hand: { label: "piece in hand — holding the last position (" + secs + "s)", cls: "warn" },
+          desync: { label: "board out of step — recovering (" + secs + "s)", cls: "bad" },
+        };
+        const m = map[d.state] || { label: d.state, cls: "" };
+        return { d, label: m.label, cls: m.cls, mismatch };
+      });
+
+      /* ---- ticker preview (first active message, real speed) ---- */
+      const tickerPreview = computed(() => {
+        const d = drafts.ticker;
+        if (!d) return null;
+        const m = d.messages.find(x => x.active !== false && String(x.text || "").trim());
+        if (!m) return null;
+        const speed = Math.min(400, Math.max(20, Number(d.speed_px_s) || 90));
+        // preview strip is ~820px wide; approximate the text at ~11px/char
+        const px = 820 + String(m.text).length * 11;
+        return { text: m.text.trim(), dur: Math.max(3, Math.round(px / speed)) };
+      });
+
       const pgnStatusLabel = computed(() => {
         if (!beatOk.value) return "no display connected";
         const p = state.st && state.st.pgn;
@@ -2030,6 +2289,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         if (id === "zones") return dirty.value.sponsors || dirty.value.zones || dirty.value.funder;
         if (id === "players") return dirty.value.roster;
         if (id === "pairingsman") return dirty.value.pm;
+        if (id === "ticker") return dirty.value.ticker;
         return false;
       };
 
@@ -2145,6 +2405,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         saveEffects, testEffect, previewEffect, sfxFiles, sfxMissing,
         PM_FIELDS, PM_LABELS, pmStatusLabel, pmPreview, pmPulled, pmManual,
         savePairingsman, fetchPmPreview,
+        boardDiag, bumpResync, bumpRestart,
+        tickerPreview, saveTicker, addTickerMsg, flashTicker,
       };
     },
   }).mount("#app");

@@ -45,6 +45,9 @@ SCC.pgn = (function () {
     fetchedAt: 0,
     matchedLen: 0,              // plies of the matched game (admin curiosity)
     rev: 0,                     // bumped when reconcile output changes (render trigger)
+    parsedGames: 0,             // games parsed from the last changed file
+    skippedGames: 0,            // older games in the file we deliberately skipped
+    parseMs: 0,                 // cost of the last parse (0 = served from cache)
   });
 
   let clks = [];                // matched game: %clk seconds per ply (null = none)
@@ -102,13 +105,36 @@ SCC.pgn = (function () {
     return { sans, clks: clkArr };
   }
 
+  /* Parsing is a full chess.js replay of every game in the file, and LiveChess
+     serves a file that GROWS all session. Re-parsing it every 6s would put an
+     ever-increasing block of main-thread work between the board and the screen
+     — the last thing a live overlay can afford. So: skip entirely when the text
+     has not changed (the common case — the file only moves when a move is
+     played), and only ever parse the LAST few games, since ours is the current
+     one. Both caps are logged in the diagnostics rather than hidden. */
+  const MAX_GAMES = 6;
+  let cacheKey = "";
+  let cacheGames = [];
+
+  function fnv1a(s) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0; }
+    return h.toString(16);
+  }
+
   function parseFile(text) {
-    const chunks = text.split(/(?=\[Event\s)/).filter(c => c.trim());
+    const key = text.length + ":" + fnv1a(text);
+    if (key === cacheKey) return cacheGames;                   // unchanged since last poll
+    const all = text.split(/(?=\[Event\s)/).filter(c => c.trim());
+    const chunks = all.length ? all.slice(-MAX_GAMES) : [text];
+    state.skippedGames = Math.max(0, all.length - chunks.length);
     const games = [];
-    for (const c of (chunks.length ? chunks : [text])) {
+    for (const c of chunks) {
       const g = parseGame(c);
       if (g) games.push(g);
     }
+    cacheKey = key; cacheGames = games;
+    state.parsedGames = games.length;
     return games;
   }
 
@@ -173,7 +199,10 @@ SCC.pgn = (function () {
         } else {
           state.source = j.source || "";
           state.fetchedAt = j.fetched_at || 0;
-          reconcile(parseFile(j.pgn));
+          const t0 = (window.performance && performance.now) ? performance.now() : 0;
+          const games = parseFile(String(j.pgn || ""));
+          state.parseMs = t0 ? Math.round(performance.now() - t0) : 0;
+          reconcile(games);
           // The server holds its last good text through probe failures (so a
           // dying source never blanks anything); it flags that payload stale.
           // Surface the flag — internal state only, no visible change.

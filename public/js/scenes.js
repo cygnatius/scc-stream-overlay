@@ -351,6 +351,18 @@ SCC.scenes = (function () {
           config_hash: cfg.hash,
           config_ok: cfg.ok,
           pgn: window.SCC.pgn ? { status: SCC.pgn.state.status, source: SCC.pgn.state.source } : null,
+          // Board tracking diagnostics — so a desync on air is visible in admin
+          // instead of being guessed at afterwards.
+          board: SCC.moves.diag ? {
+            state: SCC.moves.diag.state,
+            held_ms: SCC.moves.diag.heldMs,
+            resyncs: SCC.moves.diag.resyncs,
+            forced: SCC.moves.diag.forced,
+            unexplained: SCC.moves.diag.unexplained,
+            deep_hits: SCC.moves.diag.deepHits,
+            engine_placement: SCC.moves.diag.enginePlacement,
+            board_placement: SCC.moves.diag.boardPlacement,
+          } : null,
           pairingsman: window.SCC.pairingsman
             ? { status: SCC.pairingsman.state.status, entity: SCC.pairingsman.state.entity, fetched_at: SCC.pairingsman.state.fetchedAt }
             : null,

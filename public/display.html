@@ -219,6 +219,27 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
   letter-spacing:.14em;text-transform:uppercase;font-size:17px;color:var(--cream)}
 .board-tag{font-family:var(--word);color:var(--gold);font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:14px}
 
+/* ---- commentary ticker ------------------------------------------------- */
+/* Two mounts, one engine: .tk-slot lives inside the game footer (so the game
+   scene keeps its exact geometry), .tk-band is the bottom strip every other
+   scene uses. The rolling element is absolutely positioned inside .tk-track
+   and moved with a single composited transform. */
+.tk-slot{flex:1;min-width:0;display:flex;align-items:center;gap:14px;height:100%;overflow:hidden}
+.tk-band{position:absolute;left:0;right:0;bottom:0;height:54px;z-index:60;
+  display:flex;align-items:center;gap:16px;padding:0 26px;
+  background:linear-gradient(rgba(31,21,27,.86),rgba(31,21,27,.96));
+  border-top:2px solid var(--line);backdrop-filter:blur(2px)}
+.tk-prefix{flex:none;font-family:var(--word);font-weight:700;font-size:14px;
+  letter-spacing:.18em;text-transform:uppercase;color:var(--bg-deep);
+  background:var(--gold);padding:4px 12px;border-radius:3px}
+.tk-track{position:relative;flex:1;min-width:0;height:100%;overflow:hidden}
+.tk-item{position:absolute;top:50%;left:0;transform:translateX(1920px) translateY(-50%);
+  white-space:nowrap;will-change:transform;
+  font-family:'Figtree',sans-serif;font-weight:600;font-size:26px;color:var(--cream);
+  text-shadow:0 2px 6px rgba(0,0,0,.5)}
+/* the footer variant sits on a shorter bar, so it runs a touch smaller */
+.tk-slot .tk-item{font-size:22px}
+
 /* ---- subtle connection warning (config poll failing) ------------------- */
 /* Deliberately quiet: a dim gold dot, no red, no icons, no text on stream.   */
 .cfgwarn{position:absolute;left:10px;bottom:10px;width:8px;height:8px;
@@ -477,7 +498,17 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 
     <footer>
       <div class="live"><span class="dot"></span> Live</div>
-      <div class="channels">
+      <!-- The commentary ticker takes over the footer's centre on the game
+           scene: the footer is already the bottom bar, so nothing moves and
+           the board / cards / funder geometry is untouched. Ticker off (or off
+           for this scene) = the channels line exactly as before. -->
+      <div class="tk-slot" v-if="tickerHere">
+        <span class="tk-prefix" v-if="ticker.prefix" v-text="ticker.prefix"></span>
+        <div class="tk-track">
+          <div class="tk-item" :key="tk.key" :style="tkStyle" @transitionend="tkEnd" v-text="tk.text"></div>
+        </div>
+      </div>
+      <div class="channels" v-else>
         Watch the board live on
         <template v-for="(s, i) in socials" :key="i"><b v-text="s.label"></b><span v-if="i < socials.length - 1">&nbsp;·&nbsp;</span></template>
       </div>
@@ -606,6 +637,15 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
     </div>
   </section>
 
+  <!-- Commentary ticker band — every scene except game (which hosts it in its
+       own footer). Sits above the scene layers, below the curtain. -->
+  <div class="tk-band" v-if="tickerBand">
+    <span class="tk-prefix" v-if="ticker.prefix" v-text="ticker.prefix"></span>
+    <div class="tk-track">
+      <div class="tk-item" :key="tk.key" :style="tkStyle" @transitionend="tkEnd" v-text="tk.text"></div>
+    </div>
+  </div>
+
   <!-- fade-through-black curtain -->
   <div class="curtain" :style="curtainStyle"></div>
 
@@ -628,6 +668,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 <script src="/js/zones.js"></script>
 <script src="/js/music.js"></script>
 <script src="/js/effects.js"></script>
+<script src="/js/ticker.js"></script>
 
 <!-- zone slot card template (see the zone-card component in the boot script) -->
 <script type="text/x-template" id="tpl-zone-card">
@@ -777,6 +818,16 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       const blackClock = computed(() => game.black.sec != null ? SCC.clock.fmtSec(game.black.sec) : "—:—:—");
       const moveStatus = computed(() => (game.toMove === "w" ? "White" : "Black") + " to move");
       const cfgStale = computed(() => cfg.loaded && !cfg.ok);
+
+      /* commentary ticker — engine in ticker.js, two mounts (game footer slot
+         and the bottom band every other scene uses) */
+      const tk = SCC.ticker.view;
+      const ticker = computed(() => cfg.data.ticker || {});
+      const tkStyle = computed(() => SCC.ticker.itemStyle());
+      const tkEnd = () => SCC.ticker.onEnd();
+      const tkLive = computed(() => tk.showing && SCC.ticker.enabledNow());
+      const tickerHere = computed(() => tkLive.value && sceneView.current === "game");
+      const tickerBand = computed(() => tkLive.value && sceneView.current !== "game");
       /* PGN divergence (stage 5): the one on-air signal — a quiet dot */
       const pgnDiverged = computed(() => SCC.pgn.state.status === "diverged");
 
@@ -868,6 +919,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       return {
         game, general, eventTitle, venueLine, boardLabel, roundLabel, socials, funder, white, black,
         whiteClock, blackClock, moveStatus, cfgStale, pgnDiverged,
+        tk, ticker, tkStyle, tkEnd, tickerHere, tickerBand,
         sceneStyle, curtainStyle, startTimesLine, featureLines, postResult, fxResultKey,
         nextBroadcast, ivHasVideo,
         bandZones, gameSideZones, gameStripZones,
@@ -990,6 +1042,22 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
     SCC.config.onChange((data) => SCC.livechess.apply(data.board));
   }
   SCC.scenes.init(game, cfg);
+  SCC.ticker.init(cfg);
+
+  /* Move-engine tuning + the operator's board commands. Both commands are
+     token bumps in board.json (the same pattern the scene commands use), so
+     they work from any admin tab and survive a display reload without firing
+     twice — only a CHANGE in the token acts. */
+  let resyncSeen = null, restartSeen = null;
+  SCC.config.onChange((data) => {
+    const b = data.board || {};
+    SCC.moves.configure(b);
+    const rs = Number(b.resync_token) || 0, rt = Number(b.restart_token) || 0;
+    if (resyncSeen === null) { resyncSeen = rs; restartSeen = rt; return; }   // boot: adopt, never fire
+    if (rs !== resyncSeen) { resyncSeen = rs; SCC.moves.forceResync(); }
+    if (rt !== restartSeen) { restartSeen = rt; SCC.moves.restartFromBoard(); }
+  });
+
   SCC.config.start();
 
   /* scale the fixed 1920x1080 canvas to fit the window; OBS at 1920x1080 renders it 1:1 */
