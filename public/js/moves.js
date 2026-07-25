@@ -76,6 +76,25 @@ SCC.moves = (function () {
   let held = null;              // { placement, kind, since, sightings, deepTried }
   let resyncMs = 4000;          // board.resync_ms
   let deepSearch = true;        // board.deep_search
+  let curSerial = null;         // board serial the current model belongs to
+
+  /* A feed gap (reconnect, or a socket recycled for going silent) means the
+     moves played while we were away are simply gone. There is nothing to
+     reconstruct, so the first position we cannot explain after a gap is adopted
+     AT ONCE rather than held for the full resync window — holding would only
+     keep a stale board on air. Set by livechess.js, cleared as soon as we are
+     in step again. A position that is only pieces-lifted-off is still held:
+     that is a hand in flight, gap or no gap. */
+  let gapPending = false;
+  function noteFeedGap() { gapPending = true; }
+
+  /* A position built from a bare placement carries no side-to-move — the feed
+     doesn't say, so adopting one is always a guess. If the guess is wrong the
+     next real move looks unexplainable, which would cost a resync (and its
+     delay) on every single move. So an adopted position is flagged UNCERTAIN,
+     and while it is, an unexplainable placement is retried from the other side
+     before anything else. One real move confirms the turn and clears the flag. */
+  let turnUncertain = false;
 
   // Operator-visible diagnostics — read by the display heartbeat → admin.
   const diag = {
@@ -85,9 +104,51 @@ SCC.moves = (function () {
     forced: 0,                  // manual force-resyncs
     unexplained: 0,             // placements we could not reconstruct
     deepHits: 0,                // gaps recovered by the depth-3 search
+    gapAdopts: 0,               // boards picked up straight after a feed gap
+    restored: 0,                // move lists restored from a display reload
     enginePlacement: "",
     boardPlacement: "",
   };
+
+  /* ---- surviving a display reload --------------------------------------
+     An OBS source refresh or a page reload throws the in-memory move list
+     away, and the moves cannot be rebuilt from a single placement. So the
+     observed model is mirrored to localStorage and restored on boot — but
+     ONLY when the board is standing in exactly the position we saved, on the
+     same serial, recently. An exact placement match is the proof that the
+     history still belongs to what is on the table; anything else adopts the
+     board with a fresh list (the board still comes up correct either way). */
+  const SNAP_KEY = "scc.observed.snapshot";
+  const SNAP_MAX_AGE_MS = 6 * 3600 * 1000;
+  let snapTimer = null;
+
+  function saveSnapshot() {
+    clearTimeout(snapTimer);
+    snapTimer = setTimeout(() => {
+      try {
+        if (!GAME || !game.moves.length) return;
+        localStorage.setItem(SNAP_KEY, JSON.stringify({
+          serial: curSerial || "", placement: placementOf(GAME.fen()), turn: GAME.turn(),
+          moves: game.moves.slice(), times: obsTimes.slice(), at: Date.now(),
+        }));
+      } catch (e) { /* private mode / no storage — the board still works */ }
+    }, 800);
+  }
+
+  function loadSnapshot(placement) {
+    try {
+      const s = JSON.parse(localStorage.getItem(SNAP_KEY) || "null");
+      if (!s || !Array.isArray(s.moves) || !s.moves.length) return null;
+      if (Date.now() - (Number(s.at) || 0) > SNAP_MAX_AGE_MS) return null;
+      if (curSerial && s.serial && String(s.serial) !== String(curSerial)) return null;
+      if (s.placement !== placement) return null;
+      return s;
+    } catch (e) { return null; }
+  }
+
+  function dropSnapshot() {
+    try { localStorage.removeItem(SNAP_KEY); } catch (e) { }
+  }
 
   /* OBSERVED per-move times (stage 5). obsTimes[ply] = seconds the mover
      spent, or null. Committed with a PROVISIONAL value from the locally
@@ -143,12 +204,15 @@ SCC.moves = (function () {
     obsTimes.push(lastClk[c] != null && cur != null ? Math.max(0, lastClk[c] - cur) : null);
     lastPly[c] = game.moves.length - 1;
     game.timesVersion++;
+    turnUncertain = false;                     // a real move confirms whose turn it is
+    saveSnapshot();                            // survive a display reload
   }
 
   function newGameFromStart() {                               // board reset to the initial position
     GAME = new Chess(); game.moves = []; game.currentPly = -1; game.lastMove = null;
     GAME_STARTED = false; game.started = false;
-    held = null; clearTimes(); pushState();
+    held = null; gapPending = false; turnUncertain = false;   // start position: white to move, certain
+    clearTimes(); dropSnapshot(); pushState();
   }
 
   /* ---- placement helpers ------------------------------------------------- */
@@ -195,6 +259,7 @@ SCC.moves = (function () {
     const c = buildChess(placement, game.toMove || "w");
     if (!c) return false;
     GAME = c;
+    turnUncertain = true;                                     // the feed never told us whose move
     game.lastMove = null;                                     // unknown for an adopted position
     if (!keepMoves) { game.moves = []; game.currentPly = -1; clearTimes(); }
     else { game.currentPly = game.moves.length - 1; }
@@ -265,7 +330,7 @@ SCC.moves = (function () {
         game.timesVersion++;
         const h = GAME.history({ verbose: true }), l = h[h.length - 1];
         game.currentPly = game.moves.length - 1; game.lastMove = l ? { from: l.from, to: l.to } : null;
-        pushState(); return true;
+        pushState(); saveSnapshot(); return true;
       }
     }
     for (let i = undone.length - 1; i >= 0; i--) GAME.move(undone[i]);   // restore — not a takeback
@@ -278,6 +343,7 @@ SCC.moves = (function () {
     diag.state = !GAME ? "no board" : held ? held.kind : "synced";
     diag.heldMs = held ? Math.max(0, now - held.since) : 0;
     if (game) game.desync = diag.state === "desync";
+    if (!held) gapPending = false;             // in step again: the gap is closed
   }
 
   // Decides what to do about a placement we are currently holding. Called on
@@ -298,14 +364,15 @@ SCC.moves = (function () {
 
     // Still unexplained and settled: adopt the board as truth, keep the moves.
     if (held.kind === "desync" && now - held.since >= resyncMs && game.lcConnected !== false) {
-      if (adoptPosition(held.placement, true)) { diag.resyncs++; held = null; }
+      if (adoptPosition(held.placement, true)) { diag.resyncs++; held = null; saveSnapshot(); }
     }
     mark(now);
   }
 
-  function applyPlacement(placement) {
+  function applyPlacement(placement, serial) {
     placement = placementOf(placement);
     const now = Date.now();
+    if (serial != null && serial !== "") curSerial = String(serial);
     diag.boardPlacement = placement;
 
     if (placement === LC_LASTSEEN) {                          // unchanged since last poll
@@ -314,9 +381,31 @@ SCC.moves = (function () {
     }
     LC_LASTSEEN = placement;
 
-    if (!GAME) {                                              // very first board data: adopt what's on the board
-      if (placement === START_PLACEMENT) newGameFromStart(); else adoptPosition(placement, false);
-      held = null; mark(now); return;
+    if (!GAME) {                                              // very first board data
+      if (placement === START_PLACEMENT) newGameFromStart();
+      else {
+        // Restore the move list if this is the position we were last showing
+        // (a reload mid-game); otherwise adopt the board with a fresh list.
+        const snap = loadSnapshot(placement);
+        const c = buildChess(placement, snap ? snap.turn : (game.toMove || "w"));
+        if (c) {
+          GAME = c;
+          turnUncertain = !snap;               // a restored snapshot knows the turn
+          game.lastMove = null;
+          if (snap) {
+            game.moves = snap.moves.slice();
+            obsTimes = snap.times.slice();
+            game.currentPly = game.moves.length - 1;
+            GAME_STARTED = game.started = game.moves.length > 0;
+            diag.restored++;
+          } else {
+            game.moves = []; game.currentPly = -1; clearTimes();
+          }
+          game.timesVersion++;
+          pushState();
+        }
+      }
+      held = null; gapPending = false; mark(now); return;
     }
     if (placement === START_PLACEMENT) {                      // reset to the initial position → fresh game
       if (placementOf(GAME.fen()) !== START_PLACEMENT || game.moves.length) newGameFromStart();
@@ -333,17 +422,24 @@ SCC.moves = (function () {
     }
     if (tryTakeback(placement, 3)) { held = null; mark(now); return; }   // board went backward
 
-    // Fresh join with an unknown side-to-move: when we adopt a game already in progress we
-    // have to guess whose move it is. If that guess was wrong the first real move looks
-    // unreachable — so, ONLY while we still have no moves recorded (nothing to lose), try the
-    // other side before giving up. This never touches a game we're actually tracking.
-    if (game.moves.length === 0) {
-      const cur = placementOf(GAME.fen()), other = (GAME.turn() === "w") ? "b" : "w";
-      const test = buildChess(cur, other);                    // rights inferred, not discarded
-      if (test) for (const m of test.moves({ verbose: true })) {
-        test.move(m);
-        if (placementOf(test.fen()) === placement) { GAME = test; commitMove(m); held = null; mark(now); return; }
-        test.undo();
+    const removalOnly = isRemovalOnly(placementOf(GAME.fen()), placement);
+
+    // Our side-to-move may simply be the wrong guess from an adopted position
+    // (a fresh join, or picking the board up after a dropout). Retry from the
+    // other side — this is what stops every move after an adopt costing a
+    // resync. Skipped for a hand in flight, which no turn can explain.
+    if (turnUncertain && !removalOnly) {
+      const from = placementOf(GAME.fen()), other = (GAME.turn() === "w") ? "b" : "w";
+      const test = buildChess(from, other);                   // rights inferred, not discarded
+      if (test) {
+        const saved = GAME;
+        GAME = test;
+        const seq2 = findSequence(placement, 2);
+        if (seq2 && seq2.length) {
+          for (const m of seq2) { GAME.move(m); commitMove(m); }
+          held = null; mark(now); return;                     // commitMove clears turnUncertain
+        }
+        GAME = saved;                                         // no better: leave the model alone
       }
     }
 
@@ -351,12 +447,21 @@ SCC.moves = (function () {
     // lifted off is a hand in flight and is held indefinitely (players hover
     // for a long time); anything else has settled somewhere we cannot explain,
     // so the watchdog gives the search one more chance and then resyncs to it.
-    const kind = isRemovalOnly(placementOf(GAME.fen()), placement) ? "hand" : "desync";
+    const kind = removalOnly ? "hand" : "desync";
     if (!held || held.placement !== placement) {
       held = { placement, kind, since: now, sightings: 1, deepTried: false };
       diag.unexplained++;
     } else {
       held.kind = kind; held.sightings++;
+    }
+
+    // Straight after a feed gap there is nothing to reconstruct — pick the
+    // board up now rather than holding a stale position for the resync window.
+    if (kind === "desync" && gapPending) {
+      gapPending = false;
+      if (adoptPosition(placement, true)) {
+        diag.gapAdopts++; held = null; saveSnapshot(); mark(now); return;
+      }
     }
     watchdog(now);
   }
@@ -369,7 +474,7 @@ SCC.moves = (function () {
     const p = diag.boardPlacement || (game && game.rawPlacement);
     if (!p) return false;
     const ok = adoptPosition(placementOf(p), true);
-    if (ok) { diag.forced++; held = null; LC_LASTSEEN = placementOf(p); mark(Date.now()); }
+    if (ok) { diag.forced++; held = null; LC_LASTSEEN = placementOf(p); saveSnapshot(); mark(Date.now()); }
     return ok;
   }
 
@@ -381,7 +486,7 @@ SCC.moves = (function () {
     const ok = adoptPosition(placementOf(p), false);
     if (ok) {
       diag.forced++; held = null; LC_LASTSEEN = placementOf(p);
-      GAME_STARTED = false; game.started = false; mark(Date.now());
+      GAME_STARTED = false; game.started = false; dropSnapshot(); mark(Date.now());
     }
     return ok;
   }
@@ -396,7 +501,7 @@ SCC.moves = (function () {
   // serial, or leaving demo mode). Never called from the placement path above.
   function reset() {
     GAME = null; GAME_STARTED = false; LC_LASTSEEN = null;
-    held = null; clearTimes();
+    held = null; gapPending = false; clearTimes(); dropSnapshot();
     game.moves = []; game.currentPly = -1; game.lastMove = null;
     game.fen = SCC.board.EMPTY_PLACEMENT; game.toMove = "w"; game.started = false;
     game.desync = false;
@@ -457,7 +562,7 @@ SCC.moves = (function () {
 
   return {
     init, applyPlacement, reset, renderList, gameStatus, syncClock, obsTime,
-    configure, forceResync, restartFromBoard, diag,
+    configure, forceResync, restartFromBoard, noteFeedGap, diag,
     START_PLACEMENT, placementOf,
   };
 })();

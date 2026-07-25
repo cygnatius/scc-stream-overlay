@@ -50,8 +50,13 @@ operating the admin page: **SCC-Overlay-Manual-Setup.md**.
   hand), and if the board has genuinely drifted out of step the engine adopts
   what is physically there and keeps the move list — the board always wins over
   the notation. Admin → Board shows the tracking state and has manual
-  **Resync** / **New game from the board** buttons. Regression suite:
-  `node tools/engine-selftest.js .`
+  **Resync** / **New game from the board** buttons.
+  A dropout is survivable: the last board stays on screen, the connection is
+  rebuilt (including when the socket stays open but the feed goes silent), the
+  clocks are re-read from the feed, and the board is picked back up on the first
+  message even when the moves played in between can't be reconstructed. A
+  display reload restores the move list from the position on the board.
+  Regression suite: `node tools/engine-selftest.js .`
 
 ## Commentary ticker
 

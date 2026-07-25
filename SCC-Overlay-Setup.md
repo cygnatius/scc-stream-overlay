@@ -100,6 +100,20 @@ to the normal single-machine setup.
   "piece in hand", or "out of step — recovering". Use **New game from the
   board** only when you want the move list cleared and a fresh game started
   from the pieces as they stand.
+- **LiveChess dropped out / you restarted it mid-game** → the overlay holds the
+  last board on screen (it never blanks), reconnects on its own, and picks the
+  board up as soon as the feed returns — within a poll or two, even when the
+  moves played in the meantime can't be worked out. The clocks are re-read from
+  the feed on reconnect, so they're correct again immediately. Moves made during
+  the outage are simply missing from the list; everything after is tracked.
+- **Admin says "connected" but nothing is moving** → the Board tab's **Feed**
+  line shows how long ago the last board message arrived. A feed that goes
+  quiet while the connection looks alive is detected after ~5s and the
+  connection is recycled automatically; "connected but silent — reconnecting"
+  is what that looks like.
+- **You refreshed the OBS browser source mid-game** → the move list comes back
+  with it, as long as the pieces haven't moved in the meantime. If they have,
+  the board is still correct and the list starts from there.
 - **Moves are missing but the board is right** → that's the deliberate
   trade-off after a recovery: the position always wins over the notation.
   Nothing to do; the moves from here on are tracked normally.

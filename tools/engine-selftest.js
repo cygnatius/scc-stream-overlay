@@ -15,10 +15,19 @@ const ROOT = process.argv[2];
 const POLL_MS = 800;
 const read = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 
+// One shared store across loads, so a "display reload" can find its snapshot.
+const STORE = new Map();
+const localStorageStub = {
+  getItem: (k) => (STORE.has(k) ? STORE.get(k) : null),
+  setItem: (k, v) => STORE.set(k, String(v)),
+  removeItem: (k) => STORE.delete(k),
+};
+
 function load() {
   const clock = { t: 1700000000000 };
   const sandbox = {
     console, setTimeout, clearTimeout, setInterval, clearInterval,
+    localStorage: localStorageStub,
     Date: new Proxy(Date, { get: (t, p) => (p === "now" ? () => clock.t : t[p]) }),
     document: { createElement: () => ({ style: {}, appendChild() {}, setAttribute() {} }) },
   };
@@ -183,8 +192,88 @@ scenario("promotion + en passant", () => {
     && env.game.moves.slice(-1)[0].indexOf("=Q") > 0;
 });
 
-console.log("\n================ SUMMARY ================");
-let bad = 0;
-for (const [n, ok] of results) { if (!ok) bad++; console.log((ok ? "PASS  " : "FAIL  ") + n); }
-console.log(bad ? `\n${bad} scenario(s) FAILING` : "\nall scenarios passing");
-process.exit(bad ? 1 : 0);
+/* 9. A DROPOUT. Moves are played while the feed is away, so they are gone —
+      the board must be picked up AT ONCE (not after the resync window) and the
+      moves recorded before the outage must survive. */
+scenario("feed dropout → board picked up immediately", () => {
+  const env = load();
+  const all = P(["e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "b5", "Bb3"]);
+  for (const p of all.slice(0, 5)) push(env, p, 1);      // 4 moves tracked
+  const before = env.game.moves.length;
+
+  env.SCC.moves.noteFeedGap();                            // socket came back
+  env.SCC.moves.applyPlacement(all[9]);                   // 5 plies further on
+  const immediate = env.game.fen.split(" ")[0] === all[9];
+  const kept = env.game.moves.length === before;
+  const d = env.SCC.moves.diag;
+  console.log(`  ${immediate ? "PASS" : "FAIL"}  adopted the board on the first message (no wait) — gapAdopts=${d.gapAdopts}`);
+  console.log(`  ${kept ? "PASS" : "FAIL"}  ${before} pre-dropout moves kept`);
+
+  // and tracking continues from there
+  const c = new (load().Chess)(all[9] + " b " + "kq" + " - 0 1");
+  c.move("Na5");
+  push(env, c.fen().split(" ")[0], 1);
+  return immediate && kept && report(env, c.fen().split(" ")[0], "tracking continues after the dropout");
+});
+
+/* 10. A dropout while a piece is in hand must still HOLD — a gap is no reason
+       to adopt a position with a piece missing. */
+scenario("dropout with a piece in hand still holds", () => {
+  const env = load();
+  const all = P(["e4", "e5"]);
+  for (const p of all) push(env, p, 1);
+  const lifted = all[2].replace("5N2", "8").replace("RNBQKBNR", "RNBQKBNR");   // no knight yet; lift g1
+  const handPlacement = all[2].replace("RNBQKBNR", "RNBQKB1R");                // g1 knight in hand
+  env.SCC.moves.noteFeedGap();
+  push(env, handPlacement, 8);                            // well past resync_ms
+  const held = env.game.fen.split(" ")[0] === all[2];
+  const d = env.SCC.moves.diag;
+  console.log(`  ${held ? "PASS" : "FAIL"}  held (state=${d.state}, gapAdopts=${d.gapAdopts}, resyncs=${d.resyncs})`);
+  return held && d.state === "hand" && d.gapAdopts === 0;
+});
+
+/* 11. A DISPLAY RELOAD (OBS source refresh). The move list cannot be rebuilt
+       from one placement, so it is restored from the snapshot when the board is
+       standing in exactly the position we last showed. */
+const asyncResults = (async () => {
+  console.log("\n— display reload restores the move list");
+  STORE.clear();
+  const env = load();
+  const all = P(["e4", "e5", "Nf3", "Nc6"]);
+  for (const p of all) push(env, p, 1);
+  env.SCC.moves.applyPlacement(all[4], "3000150100");     // stamp the serial
+  await new Promise(r => setTimeout(r, 1000));            // let the debounced save land
+  const saved = STORE.size > 0;
+  console.log(`  ${saved ? "PASS" : "FAIL"}  snapshot written`);
+
+  const fresh = load();                                   // ← the reload
+  fresh.SCC.moves.applyPlacement(all[4], "3000150100");
+  const restored = fresh.game.moves.join(" ") === "e4 e5 Nf3 Nc6";
+  const mirrors = fresh.game.fen.split(" ")[0] === all[4];
+  console.log(`  ${restored ? "PASS" : "FAIL"}  move list restored after reload [${fresh.game.moves.join(" ")}]`);
+  console.log(`  ${mirrors ? "PASS" : "FAIL"}  board mirrored after reload`);
+
+  // A DIFFERENT position must NOT restore stale history — board still correct.
+  STORE.clear();
+  const env2 = load();
+  for (const p of all) push(env2, p, 1);
+  env2.SCC.moves.applyPlacement(all[4], "3000150100");
+  await new Promise(r => setTimeout(r, 1000));
+  const other = load();
+  const elsewhere = P(["d4", "d5", "c4"])[3];
+  other.SCC.moves.applyPlacement(elsewhere, "3000150100");
+  const noStale = other.game.moves.length === 0 && other.game.fen.split(" ")[0] === elsewhere;
+  console.log(`  ${noStale ? "PASS" : "FAIL"}  a different position adopts fresh (no stale history)`);
+
+  return [["display reload restores the move list", saved && restored && mirrors && noStale]];
+})();
+
+asyncResults.then((extra) => {
+  results.push(...extra);
+  console.log("\n================ SUMMARY ================");
+  let bad = 0;
+  for (const [n, ok] of results) { if (!ok) bad++; console.log((ok ? "PASS  " : "FAIL  ") + n); }
+  console.log(bad ? `\n${bad} scenario(s) FAILING` : "\nall scenarios passing");
+  process.exit(bad ? 1 : 0);
+});
+

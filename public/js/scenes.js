@@ -362,6 +362,16 @@ SCC.scenes = (function () {
             deep_hits: SCC.moves.diag.deepHits,
             engine_placement: SCC.moves.diag.enginePlacement,
             board_placement: SCC.moves.diag.boardPlacement,
+            gap_adopts: SCC.moves.diag.gapAdopts,
+            restored: SCC.moves.diag.restored,
+          } : null,
+          // Feed health: a socket can stay "open" while LiveChess has gone
+          // quiet, so the age of the last board message is what matters.
+          feed: SCC.livechess.diag ? {
+            reconnects: SCC.livechess.diag.reconnects,
+            silent_recycles: SCC.livechess.diag.silentRecycles,
+            last_msg_age_ms: SCC.livechess.diag.lastMsgAgeMs,
+            silent: SCC.livechess.diag.silent,
           } : null,
           pairingsman: window.SCC.pairingsman
             ? { status: SCC.pairingsman.state.status, entity: SCC.pairingsman.state.entity, fetched_at: SCC.pairingsman.state.fetchedAt }

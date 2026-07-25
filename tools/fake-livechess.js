@@ -32,6 +32,7 @@ const PGN_SPENT = [10, 7, 64, 13, 96];
 let played = 0;                              // plies on the "physical board"
 let mode = "off";                            // /pgn behaviour
 let override = null;                         // /_place — report this placement verbatim
+let muted = false;                           // /_mute — socket stays open, sends nothing
 
 function replay(n) {
   const c = new Chess();
@@ -105,6 +106,9 @@ const server = http.createServer((req, res) => {
   // Report an arbitrary placement, as a board that has been knocked about or a
   // piece lifted would. ?p=<placement>, or no p to go back to the script.
   if (p === "/_place") { override = new URLSearchParams(q).get("p") || null; return ok("override=" + override); }
+  // Go quiet WITHOUT closing the socket — the half-open feed that makes
+  // "connected" a lie. The overlay should notice the silence and recycle.
+  if (p === "/_mute") { muted = new URLSearchParams(q).get("m") !== "0"; return ok("muted=" + muted); }
   if (p === "/_mode") { mode = new URLSearchParams(q).get("m") || "off"; return ok("mode=" + mode); }
   if (p === "/_state") return ok(JSON.stringify({ played, mode, board: replay(played) }));
   ok("fake livechess", 200);
@@ -129,7 +133,7 @@ server.on("upgrade", (req, socket) => {
       const data = Buffer.alloc(len);
       for (let i = 0; i < len; i++) data[i] = buf[off + i] ^ mask[i % 4];
       const msg = JSON.parse(data.toString("utf8"));
-      if (msg.call === "eboards") send(socket, boardMsg());
+      if (msg.call === "eboards" && !muted) send(socket, boardMsg());
     } catch (e) { /* ignore malformed */ }
   });
 });
