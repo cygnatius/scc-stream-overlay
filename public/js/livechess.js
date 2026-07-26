@@ -35,13 +35,44 @@ SCC.livechess = (function () {
 
   let game = null;
 
-  let ws = null, pollTimer = null, reconnectTimer = null;
+  let ws = null, pollTimer = null, reconnectTimer = null, monitorTimer = null;
   let retryMs = 1000;
   const RETRY_CAP = 5000;
 
   // Currently applied connection params — apply() diffs against these.
   let cur = { effHost: undefined, serial: undefined, pollMs: undefined, demo: undefined };
   let LC_SERIAL = null, LC_LAST_W, LC_LAST_B;
+
+  /* ---- picking up again after a dropout --------------------------------
+     Three things have to happen when the feed comes back, and none of them
+     used to:
+
+     1. The BOARD has to be picked up even though the moves in between are
+        unrecoverable. moves.js is told a gap happened, so the first position
+        it cannot explain is adopted immediately instead of being held for the
+        full resync window — across a dropout there is nothing to reconstruct
+        and waiting only keeps a stale board on air.
+     2. The CLOCKS have to be re-read. The DGT feed only changes a clock value
+        at move-end, and we deliberately sync only on a change so the local
+        countdown isn't reset every poll. After an outage that rule works
+        against us: the real clocks ran while ours were frozen, and nothing
+        would correct them until the next move completed. So the first message
+        after a connect adopts the feed's values verbatim.
+     3. A SILENT socket has to be noticed. A hung LiveChess or a dead network
+        path that never sends a TCP reset leaves the socket "open" for ever:
+        onclose never fires, so the old code would sit there reporting
+        "connected" with a frozen board and no reconnect. A silence watchdog
+        recycles the connection instead. */
+  let hadConnection = false;             // we have been connected at least once
+  let clockResyncPending = false;        // adopt the feed's clocks on the next message
+  let lastMsgAt = 0;                     // last board message (epoch ms)
+
+  const diag = {
+    reconnects: 0,                       // sockets opened after the first
+    silentRecycles: 0,                   // connections dropped for going quiet
+    lastMsgAgeMs: null,                  // null = nothing received yet
+    silent: false,
+  };
 
   function init(g) { game = g; }
 
@@ -62,6 +93,31 @@ SCC.livechess = (function () {
     }
     game.lcConnected = false;
     game.clockRunSide = null;                 // nothing ticks while disconnected
+    // Force the next connection to re-read the clocks: ours are frozen at the
+    // moment we lost the feed, and the real ones keep running.
+    LC_LAST_W = undefined; LC_LAST_B = undefined;
+    clockResyncPending = true;
+  }
+
+  /* Silence watchdog. `ws` staying open is not proof the feed is alive, so a
+     board message must arrive every few polls or the socket gets recycled. */
+  function startMonitor() {
+    clearInterval(monitorTimer);
+    monitorTimer = setInterval(() => {
+      diag.lastMsgAgeMs = lastMsgAt ? Date.now() - lastMsgAt : null;
+      if (cur.demo || !cur.effHost || !ws || !game.lcConnected) { diag.silent = false; return; }
+      const grace = Math.max(5000, (Number(cur.pollMs) || 800) * 5);
+      if (lastMsgAt && Date.now() - lastMsgAt > grace) {
+        diag.silent = true;
+        diag.silentRecycles++;
+        SCC.moves.noteFeedGap();              // whatever comes back, pick the board up
+        teardown();
+        retryMs = 1000;
+        connect();
+      } else {
+        diag.silent = false;
+      }
+    }, 1000);
   }
 
   function scheduleReconnect() {
@@ -78,6 +134,13 @@ SCC.livechess = (function () {
     ws.onopen = () => {
       retryMs = 1000;
       game.lcConnected = true;
+      clockResyncPending = true;
+      // Anything could have happened on the board while we were away, and the
+      // moves in between are gone. Tell the engine so it adopts the position it
+      // finds rather than holding a stale one.
+      if (hadConnection) { diag.reconnects++; SCC.moves.noteFeedGap(); }
+      hadConnection = true;
+      lastMsgAt = Date.now();                 // start the silence clock from the open
       clearInterval(pollTimer);
       pollTimer = setInterval(() => { try { ws.send(JSON.stringify({ id: 1, call: "eboards" })); } catch (e) { } }, cur.pollMs);
     };
@@ -94,8 +157,18 @@ SCC.livechess = (function () {
       // The scene auto-detector needs this: the DGT "result" signal (both kings
       // placed on the centre squares) is exactly the kind of unreachable
       // placement the move engine deliberately holds and hides.
-      if (b.board) { game.rawPlacement = String(b.board).split(" ")[0]; SCC.moves.applyPlacement(b.board); }
+      lastMsgAt = Date.now();
+      if (b.board) { game.rawPlacement = String(b.board).split(" ")[0]; SCC.moves.applyPlacement(b.board, LC_SERIAL); }
       if (b.clock) {
+        // First message after a connect: take the feed's clocks as they stand.
+        // Done before the change-detection below so this doesn't count as a
+        // move-end sync — per-move timing is left entirely alone.
+        if (clockResyncPending) {
+          clockResyncPending = false;
+          const w0 = SCC.clock.lcClockSec(b.clock.white), b0 = SCC.clock.lcClockSec(b.clock.black);
+          if (w0 != null) { game.white.sec = w0; LC_LAST_W = b.clock.white; }
+          if (b0 != null) { game.black.sec = b0; LC_LAST_B = b.clock.black; }
+        }
         // the feed only changes these at move-end; sync ONLY on a real change so the
         // local per-second countdown isn't reset back every poll.
         if (b.clock.white !== LC_LAST_W) { LC_LAST_W = b.clock.white; const s = SCC.clock.lcClockSec(b.clock.white); if (s != null) { game.white.sec = s; SCC.moves.syncClock("w", s); } }
@@ -166,6 +239,7 @@ SCC.livechess = (function () {
     if (first || hostChanged || serialChanged || demoChanged) {
       teardown();
       retryMs = 1000;
+      startMonitor();
       connect();
       return;
     }
@@ -175,5 +249,5 @@ SCC.livechess = (function () {
     }
   }
 
-  return { init, apply, DEMO };
+  return { init, apply, diag, DEMO };
 })();

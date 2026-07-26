@@ -91,6 +91,32 @@ to the normal single-machine setup.
 - **Demo banner showing in admin** → demo mode is on (fake players on the
   display). It's a design aid — turn it off before going live; it can never
   turn itself on.
+- **The board on screen has stopped matching the real board** → Admin → Board,
+  press **Resync to the board now**. It corrects the position and keeps the
+  move list. The overlay also does this by itself: a position it can't explain
+  is held for a few seconds (that's a piece in someone's hand) and then adopted
+  if the board has genuinely drifted, so it should recover before you notice.
+  The **Tracking** line on that tab tells you which is happening — "in step",
+  "piece in hand", or "out of step — recovering". Use **New game from the
+  board** only when you want the move list cleared and a fresh game started
+  from the pieces as they stand.
+- **LiveChess dropped out / you restarted it mid-game** → the overlay holds the
+  last board on screen (it never blanks), reconnects on its own, and picks the
+  board up as soon as the feed returns — within a poll or two, even when the
+  moves played in the meantime can't be worked out. The clocks are re-read from
+  the feed on reconnect, so they're correct again immediately. Moves made during
+  the outage are simply missing from the list; everything after is tracked.
+- **Admin says "connected" but nothing is moving** → the Board tab's **Feed**
+  line shows how long ago the last board message arrived. A feed that goes
+  quiet while the connection looks alive is detected after ~5s and the
+  connection is recycled automatically; "connected but silent — reconnecting"
+  is what that looks like.
+- **You refreshed the OBS browser source mid-game** → the move list comes back
+  with it, as long as the pieces haven't moved in the meantime. If they have,
+  the board is still correct and the list starts from there.
+- **Moves are missing but the board is right** → that's the deliberate
+  trade-off after a recovery: the position always wins over the notation.
+  Nothing to do; the moves from here on are tracked normally.
 - **No music on the stream** → check the Music pill / Now line in admin
   (Admin → Music): "blocked" only happens in a normal browser tab, never in
   OBS; "no tracks" means nothing is ticked and saved; silence with

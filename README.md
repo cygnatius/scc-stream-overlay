@@ -45,6 +45,29 @@ operating the admin page: **SCC-Overlay-Manual-Setup.md**.
 - **Board / clocks / moves** — DGT LiveChess over its websocket. LiveChess
   runs on the same machine, so the default `127.0.0.1:1982` just works; a
   manual host override in admin covers the two-machine fallback.
+  The moves are rebuilt from the piece positions the board reports. A position
+  that can't be explained by a legal move is held briefly (a piece in someone's
+  hand), and if the board has genuinely drifted out of step the engine adopts
+  what is physically there and keeps the move list — the board always wins over
+  the notation. Admin → Board shows the tracking state and has manual
+  **Resync** / **New game from the board** buttons.
+  A dropout is survivable: the last board stays on screen, the connection is
+  rebuilt (including when the socket stays open but the feed goes silent), the
+  clocks are re-read from the feed, and the board is picked back up on the first
+  message even when the moves played in between can't be reconstructed. A
+  display reload restores the move list from the position on the board.
+  Regression suite: `node tools/engine-selftest.js .`
+
+## Commentary ticker
+
+Type messages in Admin → **Ticker** and they roll along the bottom in turn,
+looping. Any change — add, edit, delete — applies either **gracefully** (the
+message on air finishes first, then the new list takes over at the cycle
+boundary) or **forced** (whatever is on screen is dropped and the list restarts
+immediately). "Say something now" prepends a line and forces it straight to
+air. On the game scene the ticker uses the footer strip so nothing else moves;
+every other scene gets a band across the bottom. Per-scene visibility, speed
+and an optional standing label are all configurable.
 - **Players / event** — typed in admin (roster with photos supported), or
   auto-filled from the Pairingsman broadcast API (read-only; configured on
   the admin Pairingsman tab, every field switchable auto / manual / hidden).
