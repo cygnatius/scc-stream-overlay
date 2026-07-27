@@ -33,6 +33,10 @@ let played = 0;                              // plies on the "physical board"
 let mode = "off";                            // /pgn behaviour
 let override = null;                         // /_place — report this placement verbatim
 let muted = false;                           // /_mute — socket stays open, sends nothing
+let clockOv = null;                          // /_clock — force clock values and/or run flag
+
+// seconds or "H:MM:SS" → seconds
+function parseSec(v) { if (v == null) return null; if (String(v).includes(":")) { return String(v).split(":").map(Number).reduce((a, n) => a * 60 + n, 0); } const n = Number(v); return isNaN(n) ? null : n; }
 
 function replay(n) {
   const c = new Chess();
@@ -48,12 +52,19 @@ const fmt = (s) => Math.floor(s / 3600) + ":" + String(Math.floor((s % 3600) / 6
 
 function boardMsg() {
   const { placement, clocks } = replay(played);
+  let w = clocks.w, b = clocks.b, run = played > 0;
+  if (clockOv) {
+    if (clockOv.w != null) w = clockOv.w;
+    if (clockOv.b != null) b = clockOv.b;
+    if (clockOv.run === "0") run = false;         // force stopped (never-asserts-run hardware)
+    else if (clockOv.run === "1") run = true;     // force running
+  }
   return JSON.stringify({
     response: "call", id: 1,
     param: [{
       serialnr: "3000150100", state: "ACTIVE",
       board: override || placement,
-      clock: { white: fmt(clocks.w), black: fmt(clocks.b), run: played > 0 },
+      clock: { white: fmt(Math.max(0, w)), black: fmt(Math.max(0, b)), run },
     }],
   });
 }
@@ -102,7 +113,16 @@ const server = http.createServer((req, res) => {
   }
   if (p === "/_advance") { if (played < SCRIPT.length) played++; return ok("played=" + played); }
   if (p === "/_back") { if (played > 0) played--; return ok("played=" + played); }
-  if (p === "/_reset") { played = 0; override = null; return ok("reset"); }
+  if (p === "/_reset") { played = 0; override = null; clockOv = null; return ok("reset"); }
+  // Force clock values and/or the run flag. ?w=<sec|h:mm:ss>&b=..&run=0|1, or
+  // ?off=1 to clear. run=0 simulates a board that never asserts run (the tick
+  // must then infer); driving w or b to 0 exercises feed-authoritative flagfall.
+  if (p === "/_clock") {
+    const u = new URLSearchParams(q);
+    if (u.get("off") === "1") { clockOv = null; return ok("clock override off"); }
+    clockOv = { w: u.has("w") ? parseSec(u.get("w")) : null, b: u.has("b") ? parseSec(u.get("b")) : null, run: u.has("run") ? u.get("run") : "auto" };
+    return ok("clock=" + JSON.stringify(clockOv));
+  }
   // Report an arbitrary placement, as a board that has been knocked about or a
   // piece lifted would. ?p=<placement>, or no p to go back to the script.
   if (p === "/_place") { override = new URLSearchParams(q).get("p") || null; return ok("override=" + override); }

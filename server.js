@@ -202,10 +202,16 @@ const CONFIG_DEFAULTS = {
   players: {
     global_photo_mode: "photos_and_avatars",  // photos_and_avatars | photos_only | no_photos
     manual: {                            // labels are literally "White" and "Black"
-      white: { name: "", rating: null, record: "", title: "", photo: "" },
-      black: { name: "", rating: null, record: "", title: "", photo: "" },
+      // record is now the numeric wins/draws/losses; the display formats them
+      // W–D–L ("4–1–2") or W–L ("1–4") — the same format as before. `record`
+      // (free text) is kept only as a fallback for a Pairingsman-supplied string.
+      white: { name: "", rating: null, record: "", title: "", photo: "", wins: 0, draws: 0, losses: 0 },
+      black: { name: "", rating: null, record: "", title: "", photo: "", wins: 0, draws: 0, losses: 0 },
     },
-    roster: [],                          // { name, photo, use_photo, rating, record }
+    // The result recorded for the CURRENT game, so the result buttons can be
+    // undone. Cleared by Undo; a fresh click just overwrites it.
+    last_result: { code: "", at: 0 },    // code: "" | "1-0" | "draw" | "0-1"
+    roster: [],                          // { name, photo, use_photo, rating, wins, draws, losses }
   },
 
   pairingsman: {
@@ -240,8 +246,22 @@ const CONFIG_DEFAULTS = {
       sound: "blip",
       volume: 45,
     },
+    // Move cues (chess.com-style). Independent switch — on by default because
+    // a broadcast usually wants them. Each event's value is a built-in synth
+    // name (move|check|checkmate|stalemate|flagfall), "file:<assets/sfx name>",
+    // or "" for silence. Flagfall is driven by the feed clock reaching zero,
+    // never by the display's local countdown.
+    move_sounds: {
+      enabled: true,
+      volume: 55,
+      move: "move",
+      check: "check",
+      checkmate: "checkmate",
+      stalemate: "stalemate",
+      flagfall: "flagfall",
+    },
     test_count: 0,                       // admin test-fire nudge; the display acts on change
-    test_event: "featured_result",       // featured_result | other_results
+    test_event: "featured_result",       // featured_result | other_results | move:<kind>
   },
 };
 

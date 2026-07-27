@@ -121,6 +121,16 @@ that need **no files at all**, or a short custom one-shot dropped into
 OBS hears them with the room silent; admin has a local **Preview** per
 sound and **Test** buttons that fire the saved cues on the display.
 
+## Move sounds
+
+chess.com-style cues as the game is played (same **Music & FX** tab, on by
+default): a soft tock on a move, and distinct cues for **check**,
+**checkmate**, **stalemate** and **flagfall**. Built-in synthesised sounds
+need no files; each event can be muted or pointed at a custom `assets/sfx/`
+one-shot, with its own volume. **Flagfall fires only when the DGT feed
+reports a clock at zero** — never from the on-screen countdown estimate, so
+it can't cry flag on a display clock that merely looks empty.
+
 ## The legacy single file
 
 `scc-stream-overlay.html` at the repo root is the previous self-contained
