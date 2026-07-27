@@ -67,6 +67,32 @@ SCC.livechess = (function () {
   let clockResyncPending = false;        // adopt the feed's clocks on the next message
   let lastMsgAt = 0;                     // last board message (epoch ms)
 
+  /* ---- clock running + flagfall -----------------------------------------
+     The per-second countdown is gated on the DGT feed's `clock.run`. On some
+     boards/firmware that flag is never asserted, and then the display only
+     jumped at each move-end sync instead of ticking — "the clock only counts
+     down some of the time." So the gate ADAPTS: if this connection has ever
+     seen run asserted, we trust it exactly as before (no change on hardware
+     that reports it, incl. the test rig). If it has NEVER been asserted, we
+     fall back to inferring from game state — the side to move's clock runs
+     once the game is under way and until it is over. Pre-game is still quiet
+     because game.started is false until the first move.
+
+     Flagfall is FEED-AUTHORITATIVE: it fires only when the feed itself
+     delivers a clock value of zero, never from the local countdown (which is
+     a display estimate). Latched per side so it fires once, and re-armed when
+     the feed shows that clock positive again (a new game or a clock reset).  */
+  let sawRunTrue = false;
+  const flagged = { w: false, b: false };
+
+  function noteFeedClock(side, s) {      // s: seconds from a real feed change
+    if (s == null) return;
+    if (s > 0) { flagged[side] = false; return; }
+    if (flagged[side]) return;
+    flagged[side] = true;                // feed says this clock has reached zero
+    game.flagfall = { side, seq: (game.flagfall && game.flagfall.seq || 0) + 1 };
+  }
+
   const diag = {
     reconnects: 0,                       // sockets opened after the first
     silentRecycles: 0,                   // connections dropped for going quiet
@@ -97,6 +123,7 @@ SCC.livechess = (function () {
     // moment we lost the feed, and the real ones keep running.
     LC_LAST_W = undefined; LC_LAST_B = undefined;
     clockResyncPending = true;
+    sawRunTrue = false;                        // re-learn this board's run semantics on reconnect
   }
 
   /* Silence watchdog. `ws` staying open is not proof the feed is alive, so a
@@ -166,20 +193,25 @@ SCC.livechess = (function () {
         if (clockResyncPending) {
           clockResyncPending = false;
           const w0 = SCC.clock.lcClockSec(b.clock.white), b0 = SCC.clock.lcClockSec(b.clock.black);
-          if (w0 != null) { game.white.sec = w0; LC_LAST_W = b.clock.white; }
-          if (b0 != null) { game.black.sec = b0; LC_LAST_B = b.clock.black; }
+          // adopt verbatim, and set the flag latch silently (no buzzer for a
+          // clock that was already down when we reconnected)
+          if (w0 != null) { game.white.sec = w0; LC_LAST_W = b.clock.white; flagged.w = w0 <= 0; }
+          if (b0 != null) { game.black.sec = b0; LC_LAST_B = b.clock.black; flagged.b = b0 <= 0; }
         }
         // the feed only changes these at move-end; sync ONLY on a real change so the
-        // local per-second countdown isn't reset back every poll.
-        if (b.clock.white !== LC_LAST_W) { LC_LAST_W = b.clock.white; const s = SCC.clock.lcClockSec(b.clock.white); if (s != null) { game.white.sec = s; SCC.moves.syncClock("w", s); } }
-        if (b.clock.black !== LC_LAST_B) { LC_LAST_B = b.clock.black; const s = SCC.clock.lcClockSec(b.clock.black); if (s != null) { game.black.sec = s; SCC.moves.syncClock("b", s); } }
-        // Only tick a clock while the DGT feed says one is running — this is what stops the
-        // pre-game countdown. `clock.run` is a BOOLEAN: true while a clock is running, null/
-        // false when both are stopped (before the game starts and while it's paused). It does
-        // not name a side, so the running clock is simply the side to move. (The feed's white/
-        // black values hold steady between moves — confirmed live — so we tick locally and
-        // re-sync to the feed only when it changes, at move-end, above.)
-        game.clockRunSide = b.clock.run ? game.toMove : null;
+        // local per-second countdown isn't reset back every poll. A real change is
+        // also the only place flagfall is judged — see noteFeedClock.
+        if (b.clock.white !== LC_LAST_W) { LC_LAST_W = b.clock.white; const s = SCC.clock.lcClockSec(b.clock.white); if (s != null) { game.white.sec = s; SCC.moves.syncClock("w", s); noteFeedClock("w", s); } }
+        if (b.clock.black !== LC_LAST_B) { LC_LAST_B = b.clock.black; const s = SCC.clock.lcClockSec(b.clock.black); if (s != null) { game.black.sec = s; SCC.moves.syncClock("b", s); noteFeedClock("b", s); } }
+        // Tick the side to move. Prefer the feed's own run flag; if this board
+        // never asserts it, infer from game state so the clock still ticks
+        // smoothly (see the clock/flagfall note above). Pre-game stays quiet
+        // via game.started; a finished game stops.
+        if (b.clock.run) sawRunTrue = true;
+        const running = sawRunTrue
+          ? !!b.clock.run
+          : (game.started && !SCC.moves.gameStatus().over);
+        game.clockRunSide = running ? game.toMove : null;
       }
     };
     ws.onclose = () => {

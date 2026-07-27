@@ -19,14 +19,16 @@ times (they feed the *start* scene), social links for the footer, and the
 default; switch to manual to type a date, or hide it).
 
 **Live tab → Match** — type the two players in under the literal **White**
-and **Black** labels: name, optional title (CM, WFM…), optional rating,
-optional record (`1–4` and `4–1–2` styles both fine). Or skip typing:
+and **Black** labels: name, optional title (CM, WFM…), optional rating, and
+the record as **wins / draws / losses** (three number fields). It shows on
+stream as `4–1–2` (W–D–L), or `1–4` when there are no draws, and nothing at
+0/0/0 — same look as before, now driven by the numbers. Or skip typing:
 
-**Players tab** — keep a club **roster** (name, photo, rating, record). Press
+**Players tab** — keep a club **roster** (name, photo, rating, W/D/L). Press
 **→ White** / **→ Black** on a roster row to drop that player straight into
-the match fields, photo included. Photos upload here (or drop files into
-`assets/players/` and Rescan). The **photo policy** picks photos + initials
-avatars, photos only, or no photos at all.
+the match fields, photo and record included. Photos upload here (or drop
+files into `assets/players/` and Rescan). The **photo policy** picks photos +
+initials avatars, photos only, or no photos at all.
 
 **Sponsors & Zones tab** — sponsor records (name, tier, logo, message) and
 the zone layout: left / centre / right, each whole or split top + bottom.
@@ -61,6 +63,12 @@ files; custom one-shots go in `assets/sfx/`. **Preview** plays a sound right
 in admin while you choose; **Test** fires the saved cue on the display so you
 can see it exactly as the stream would.
 
+And **Move sounds** (on by default): chess.com-style cues as the game plays —
+move, check, checkmate, stalemate and flagfall — each mutable or pointed at a
+custom sound, with one volume. Flagfall only fires when the **DGT feed** hands
+over a clock at zero, so a display clock that just looks empty never triggers
+it.
+
 ---
 
 ## During the broadcast — the Live tab
@@ -77,9 +85,15 @@ can see it exactly as the stream would.
   kings placed on the centre squares). Every proposal shows at the top with a
   countdown and a **Cancel** button before it fires. A board disconnect
   withdraws proposals rather than firing them.
-- **Postgame result** — press `1–0` / `½–½` / `0–1` the moment the game ends
-  (they write immediately), or type anything ("White wins on forfeit") and
-  **Set**.
+- **Result & game end** — press **White wins** / **Draw** / **Black wins** the
+  moment the game ends. One click does three things: it records the result
+  against the two players (winner +1 win, loser +1 loss; a draw is +1 each, so
+  White 2–0 & Black 1–1 becomes White 3–0 & Black 1–2 on a White win), sets the
+  postgame result, and starts the game-end sequence. The records update live on
+  the postgame scene. **Undo last** reverses it and returns to the game; a
+  double-click is ignored so you can't count a game twice. **Set label only**
+  writes just the postgame text (e.g. "White wins on forfeit") without touching
+  records.
 - **Demo mode** — shows the built-in fake game for designing scenes and
   sponsor layouts with no board present. A persistent banner shows in admin
   while it's on; the stream shows no indicator. Turn it off before going live.

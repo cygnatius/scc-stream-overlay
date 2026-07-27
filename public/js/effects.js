@@ -40,6 +40,7 @@ SCC.effects = (function () {
   const view = Vue.reactive({ resultKey: 0, zones: {} });
 
   let cfg = null;                       // SCC.config.store (display only)
+  let game = null;                      // reactive game state (display only) — move-sound source
   let audioInert = false;               // ?music=0 — this instance emits no audio at all
   let ctx = null;
   let blocked = false;                  // context suspended when a cue tried to play
@@ -94,7 +95,35 @@ SCC.effects = (function () {
       note(c, 523.25, t, vol * 0.5, 0.16, "triangle");
       note(c, 784.0, t + 0.05, vol * 0.35, 0.18, "triangle");
     },
+    // ---- move cues (chess.com-flavoured, tuned quiet) ----
+    move(c, vol) {                       // soft woody tock on a normal move
+      const t = c.currentTime + 0.01;
+      note(c, 180, t, vol * 0.6, 0.11, "triangle");
+      note(c, 240, t + 0.014, vol * 0.32, 0.09, "sine");
+    },
+    check(c, vol) {                      // bright rising alert
+      const t = c.currentTime + 0.01;
+      note(c, 784.0, t, vol * 0.55, 0.16);          // G5
+      note(c, 1174.7, t + 0.085, vol * 0.5, 0.22);  // D6
+    },
+    checkmate(c, vol) {                  // decisive: fifth then a resolving octave
+      const t = c.currentTime + 0.01;
+      note(c, 392.0, t, vol * 0.6, 0.5);            // G4
+      note(c, 587.3, t, vol * 0.38, 0.5);           // D5
+      note(c, 784.0, t + 0.15, vol * 0.62, 0.75);   // G5
+    },
+    stalemate(c, vol) {                  // flat, anticlimactic — two equal muted notes
+      const t = c.currentTime + 0.01;
+      note(c, 330.0, t, vol * 0.5, 0.28, "triangle");
+      note(c, 330.0, t + 0.2, vol * 0.42, 0.32, "triangle");
+    },
+    flagfall(c, vol) {                   // urgent low double-buzz, not harsh
+      const t = c.currentTime + 0.01;
+      note(c, 220.0, t, vol * 0.5, 0.15, "sawtooth");
+      note(c, 220.0, t + 0.16, vol * 0.5, 0.2, "sawtooth");
+    },
   };
+  const MOVE_KINDS = ["move", "check", "checkmate", "stalemate", "flagfall"];
 
   async function playFile(name, vol) {
     const c = ctx;                       // caller has ensured a running context
@@ -166,6 +195,18 @@ SCC.effects = (function () {
     if (!audioInert) play(typeof ev.sound === "string" ? ev.sound : "", ev.volume);
   }
 
+  // Move cues (audio only — the board already shows the move). Gated on their
+  // OWN switch, independent of the result-effects master, so a venue can run
+  // move sounds without the result pop/pulse or vice versa.
+  function fireMove(kind, test) {
+    const ms = fxCfg().move_sounds || {};
+    if (!test && ms.enabled === false) return;
+    if (audioInert) return;
+    // per-event sound id; default to the kind's own built-in synth
+    const sound = typeof ms[kind] === "string" ? ms[kind] : kind;
+    play(sound, ms.volume == null ? 60 : ms.volume);
+  }
+
   /* ----------------------------------------------------------- sources */
 
   // The result exactly as the display resolves it: hidden → nothing;
@@ -208,8 +249,9 @@ SCC.effects = (function () {
 
   /* --------------------------------------------------------------- init */
 
-  function init(configStore) {
+  function init(configStore, gameRef) {
     cfg = configStore;
+    game = gameRef || window.SCC.game || null;
     const q = new URLSearchParams(location.search);
     audioInert = q.get("music") === "0" || q.get("music") === "off";
 
@@ -258,6 +300,28 @@ SCC.effects = (function () {
       if (hits.length) fireZoneHits(hits, false);
     });
 
+    // Move sounds: fire on a new LIVE move. game.moves.length increasing by 1
+    // (or 2 for a recovered missed poll) is a real move; a bulk jump is a
+    // display-reload restore, a decrease is a takeback, and a settling window
+    // after boot suppresses both. The cue reflects the resulting position.
+    if (game) {
+      let lastLen = game.moves.length;
+      const settleUntil = Date.now() + 1500;         // ignore boot-time restores
+      Vue.watch(() => game.moves.length, (n) => {
+        const prev = lastLen; lastLen = n;
+        if (n <= prev || n - prev > 2) return;       // takeback/reset, or bulk restore
+        if (!game.started || game.demo) return;
+        if (Date.now() < settleUntil) return;
+        const st = SCC.moves.gameStatus();
+        fireMove(st.checkmate ? "checkmate" : st.stalemate ? "stalemate" : st.check ? "check" : "move", false);
+      });
+      // Flagfall — driven ONLY by livechess's feed-authoritative signal
+      // (game.flagfall bumps its seq), never by the local clock estimate.
+      Vue.watch(() => game.flagfall && game.flagfall.seq, (seq) => {
+        if (seq) fireMove("flagfall", false);
+      });
+    }
+
     // Admin test-fire: counters consumed as changes, never replayed on boot.
     SCC.config.onChange(() => {
       const e = fxCfg();
@@ -265,14 +329,17 @@ SCC.effects = (function () {
       if (lastTest === null) { lastTest = n; return; }
       if (n === lastTest) return;
       lastTest = n;
-      if (e.test_event === "other_results") {
+      const ev = e.test_event;
+      if (ev === "other_results") {
         const zs = visibleDataZones();
         fireZoneHits(zs.map(z => ({ id: z.id, lines: z.lines.map((_, i) => i) })), true);
+      } else if (typeof ev === "string" && ev.indexOf("move:") === 0) {
+        fireMove(ev.slice(5), true);
       } else {
         fireFeatured(true);
       }
     });
   }
 
-  return { init, view, status, preview };
+  return { init, view, status, preview, MOVE_KINDS };
 })();

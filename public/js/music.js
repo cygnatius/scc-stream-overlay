@@ -33,6 +33,8 @@ SCC.music = (function () {
 
   let cfg = null;                       // SCC.config.store
   let el = null;                        // the (never-attached-to-layout) <audio>
+  let pre = null;                       // silent preloader — buffers the NEXT track so the
+                                        // gap between songs is a cache hit, not a cold fetch
   let inert = false;                    // ?music=0
 
   let order = [];                       // filenames in play order
@@ -111,12 +113,30 @@ SCC.music = (function () {
 
   /* ----------------------------------------------------------- playback */
 
+  const trackUrl = (file) => "/assets/music/" + encodeURIComponent(file);
+
   function loadTrack(file) {
     current = file;
     try { localStorage.setItem(LS_KEY, JSON.stringify({ file })); } catch (e) { }
     el.loop = order.length === 1;                  // a one-track library loops gaplessly
-    el.src = "/assets/music/" + encodeURIComponent(file);
+    el.src = trackUrl(file);
     el.load();
+    warmNext();                                    // start buffering whatever plays next
+  }
+
+  // Buffer the NEXT track in a silent element so the ended→load→play handoff
+  // reads from the browser cache instead of a fresh network fetch — the fix
+  // for the long silence the operator heard between songs. Audio files are
+  // served cacheable (max-age), so el reuses what pre fetched. A single-track
+  // library loops the same file, so there is nothing to warm.
+  function warmNext() {
+    if (!pre || order.length < 2) return;
+    const i = order.indexOf(current);
+    const nf = order[(i + 1) % order.length];
+    if (!nf || pre.dataset.file === nf) return;
+    pre.dataset.file = nf;
+    pre.src = trackUrl(nf);
+    pre.load();
   }
 
   function startPlayback() {
@@ -226,6 +246,7 @@ SCC.music = (function () {
       // stale kill-timer can never silence a track we decided should play.
       if (fade.target !== 1) fadeTo(1);
     }
+    warmNext();                                    // re-point the preloader if the order changed
   }
 
   /* ------------------------------------------------------ element events */
@@ -292,8 +313,14 @@ SCC.music = (function () {
     el.addEventListener("playing", onPlaying);
     el.addEventListener("ended", onEnded);
     el.addEventListener("error", onError);
+    // silent preloader — buffers the next track, never played, never audible
+    pre = document.createElement("audio");
+    pre.preload = "auto";
+    pre.muted = true;
+    pre.dataset.file = "";
     // never appended to the stage — audio needs no box on a 1920×1080 canvas
     document.body.appendChild(el);
+    document.body.appendChild(pre);
 
     SCC.config.onChange(() => reconcile());
     SCC.scenes.onSceneChange(() => reconcile());

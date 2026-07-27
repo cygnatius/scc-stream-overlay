@@ -717,6 +717,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
     demo: false,
     lcConnected: false,
     clockRunSide: null,
+    flagfall: null,               // { side, seq } — set by livechess ONLY from a feed clock at zero
     white: { sec: null },
     black: { sec: null },
   });
@@ -735,7 +736,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
   SCC.pgn.init(game, cfg);
   SCC.pairingsman.init(cfg);
   SCC.music.init(cfg);          // background bed; ?music=0 keeps a second instance silent
-  SCC.effects.init(cfg);        // result cues; same ?music=0 rule for its audio
+  SCC.effects.init(cfg, game);  // result + move cues; same ?music=0 rule for its audio
 
   /* Field tri-state (stage 6): hidden → nothing; auto → the Pairingsman
      value when present, else the manual value (null = not available, per
@@ -755,6 +756,18 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
     const [h, m] = s.split(":").map(Number);
     if (isNaN(h) || isNaN(m)) return "";
     return (((h + 11) % 12) + 1) + ":" + String(m).padStart(2, "0") + " " + (h >= 12 ? "pm" : "am");
+  }
+
+  // Record display: numeric W/D/L win — formatted W–D–L ("4–1–2") or W–L
+  // ("1–4"), same as before, and blank at 0–0–0. A Pairingsman/demo source
+  // has no W/D/L fields, so its ready-made `record` string is used verbatim.
+  function recordOf(src) {
+    const hasWDL = ["wins", "draws", "losses"].some(k => src[k] != null && src[k] !== "" && !isNaN(Number(src[k])));
+    if (hasWDL) {
+      const w = Number(src.wins) || 0, d = Number(src.draws) || 0, l = Number(src.losses) || 0;
+      return (w + d + l) > 0 ? SCC.pairingsman.fmtRecord(w, d, l) : "";
+    }
+    return src.record || "";
   }
 
   function playerView(side) {
@@ -778,7 +791,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
         name: src.name || "—",
         title: src.title || "",
         rating: src.rating == null ? "" : String(src.rating),
-        record: src.record || "",
+        record: recordOf(src),
         photo,
         // photos_and_avatars: photo, else initials avatar. photos_only:
         // photo or nothing. no_photos: nothing — the card collapses the

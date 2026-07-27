@@ -190,7 +190,8 @@ input[type=range]{accent-color:var(--gold);width:100%;padding:0;height:28px;curs
 
 /* sponsors / zones / roster editors (stage 4) */
 .sprow{display:grid;grid-template-columns:22px 170px 105px 150px 46px 1fr 1fr auto;gap:8px;align-items:center}
-.plrow{display:grid;grid-template-columns:46px 165px 150px 82px 85px 150px auto auto auto;gap:8px;align-items:center}
+.plrow{display:grid;grid-template-columns:46px 150px 132px 68px 62px 52px 52px 52px auto auto auto;gap:8px;align-items:center}
+.plrow input[type=number]{padding:8px 6px}
 .thumb{width:46px;height:38px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;
   display:grid;place-items:center;overflow:hidden;flex:none}
 .thumb img{max-width:100%;max-height:100%;object-fit:contain}
@@ -299,31 +300,34 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     </div>
 
     <div class="card">
-      <h2>Postgame result</h2>
-      <p class="sub">Shown on the postgame scene. Presets write immediately; the field is for anything else (e.g. “White wins on forfeit”). Automatic results arrive with the PGN and Pairingsman stages.</p>
-      <div class="btns" style="margin-bottom:12px">
-        <button @click="saveResult('1–0')">1–0</button>
-        <button @click="saveResult('½–½')">½–½</button>
-        <button @click="saveResult('0–1')">0–1</button>
-        <button class="ghost" @click="saveResult('')">Clear</button>
+      <h2>Result &amp; game end</h2>
+      <p class="sub">One click ends the game: it <b>records the result</b> against the two players below (winner +1 win, loser +1 loss; a draw is +1 each), sets the postgame result, and starts the <b>game-end sequence</b>. The player records on the postgame scene update live. <b>Undo</b> reverses the last one. “Set label only” writes just the postgame text (e.g. a forfeit) without touching records.</p>
+      <div class="btns" style="margin-bottom:10px">
+        <button class="primary" @click="applyResult('1-0')">White wins — 1–0</button>
+        <button class="primary" @click="applyResult('draw')">Draw — ½–½</button>
+        <button class="primary" @click="applyResult('0-1')">Black wins — 0–1</button>
+        <button class="ghost" :disabled="!lastResultCode" @click="undoResult">Undo last</button>
       </div>
+      <p class="hint" style="margin-bottom:10px" v-if="resultSummary">{{ resultSummary }}</p>
       <div class="unit">
-        <input type="text" v-model="drafts.result" placeholder="Custom result text" @keyup.enter="saveResult(drafts.result)">
-        <button class="primary" @click="saveResult(drafts.result)">Set</button>
+        <input type="text" v-model="drafts.result" placeholder="Custom postgame text (e.g. White wins on forfeit)" @keyup.enter="setResultLabelOnly(drafts.result)">
+        <button @click="setResultLabelOnly(drafts.result)">Set label only</button>
       </div>
     </div>
 
     <div class="card">
       <h2>Match — manual players</h2>
-      <p class="sub">Drives the player cards on the game, versus and postgame scenes. Photos, the club roster and Pairingsman auto-fill arrive in their stages — these fields are the manual mode and always work.</p>
+      <p class="sub">Drives the player cards on the game, versus and postgame scenes. The record is wins / draws / losses — shown as <b>W–D–L</b> (“4–1–2”) or <b>W–L</b> when there are no draws (“1–4”); 0/0/0 shows nothing. The result buttons above bump these.</p>
       <div class="match">
         <div v-for="side in ['white','black']" :key="side">
-          <div class="colhead">{{ side === 'white' ? 'White' : 'Black' }}</div>
+          <div class="colhead">{{ side === 'white' ? 'White' : 'Black' }} <span style="font-weight:400;color:var(--cream-dim);font-size:14px">— {{ recordPreview(drafts.match[side]) }}</span></div>
           <div class="frm">
             <div class="f wide"><label>Name</label><input type="text" v-model="drafts.match[side].name" placeholder="—"></div>
             <div class="f"><label>Title</label><input type="text" v-model="drafts.match[side].title" placeholder="CM, WFM…"></div>
             <div class="f"><label>Rating</label><input type="text" v-model="drafts.match[side].rating" placeholder="1685"></div>
-            <div class="f"><label>Record</label><input type="text" v-model="drafts.match[side].record" placeholder="3½ / 4"></div>
+            <div class="f"><label>Wins</label><input type="number" min="0" v-model="drafts.match[side].wins"></div>
+            <div class="f"><label>Draws</label><input type="number" min="0" v-model="drafts.match[side].draws"></div>
+            <div class="f"><label>Losses</label><input type="number" min="0" v-model="drafts.match[side].losses"></div>
           </div>
         </div>
       </div>
@@ -827,6 +831,27 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         That display tab's browser refused audio without a click (a normal browser tab — OBS is never blocked): click the display page once to unlock it there.
       </p>
 
+      <h3>Move sounds</h3>
+      <p class="sub">Cues as the game is played, chess.com style — a soft tock on a move, distinct sounds for check, checkmate, stalemate and flagfall. Independent of the result effects above (this switch is its own). <b>Flagfall fires only when the DGT feed reports a clock at zero</b>, never from the on-screen countdown estimate. Built-in cues need no files; custom one-shots come from <code>assets/sfx/</code> too.</p>
+      <label class="chk"><input type="checkbox" v-model="drafts.effects.ms.enabled"> Enable move sounds</label>
+      <div class="frm" style="margin-top:10px">
+        <div class="f"><label>Volume</label><div class="unit"><input type="number" min="0" max="100" step="5" v-model="drafts.effects.ms.volume"><span>%</span></div></div>
+      </div>
+      <table class="ttable" style="margin-top:8px">
+        <tr><th>Event</th><th>Sound</th><th>Preview</th><th>Test on display</th></tr>
+        <tr v-for="mk in MOVE_KINDS" :key="mk">
+          <td>{{ MOVE_LABELS[mk] }}</td>
+          <td><select v-model="drafts.effects.ms[mk]" style="min-width:150px">
+            <option value="">off</option>
+            <option :value="mk">built-in</option>
+            <option v-for="f in sfxFiles" :key="f" :value="'file:' + f">{{ f }}</option>
+            <option v-if="sfxMissing(drafts.effects.ms[mk])" :value="drafts.effects.ms[mk]">missing — {{ drafts.effects.ms[mk].slice(5) }}</option>
+          </select></td>
+          <td><button class="ghost" :disabled="!drafts.effects.ms[mk]" @click="previewMove(mk)">▶ Preview</button></td>
+          <td><button class="ghost" @click="testEffect('move:' + mk)">Fire</button></td>
+        </tr>
+      </table>
+
       <div class="savebar">
         <span class="dirty" v-if="dirty.effects">Unsaved changes</span>
         <span class="diskchg" v-if="diskChanged.effects">Changed on disk — Save overwrites, Revert loads it</span>
@@ -975,7 +1000,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
 
     <div class="card">
       <h2>Roster</h2>
-      <p class="sub">Club players with photos, ratings and records (either 1–4 or 4–1–2 style). “→ White / → Black” copies a player into the manual match fields on the Live tab — photo included when photo use is on; the title clears, set it there if needed. Photos live in <code>assets/players/</code>.</p>
+      <p class="sub">Club players with photos, ratings and records. The record is wins / draws / losses, shown as “4–1–2” (or “1–4” with no draws). “→ White / → Black” copies a player into the manual match fields on the Live tab — photo and record included when photo use is on; the title clears, set it there if needed. Photos live in <code>assets/players/</code>.</p>
       <div class="btns" style="margin-bottom:12px">
         <button class="ghost" @click="pickUpload('players')">Upload photo…</button>
         <button class="ghost" @click="loadAssets('players', true)">Rescan folder</button>
@@ -990,12 +1015,14 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
           </select>
           <label class="chk" title="Per-player photo use"><input type="checkbox" v-model="p.use_photo"> photo</label>
           <input type="text" v-model="p.rating" placeholder="rating">
-          <input type="text" v-model="p.record" placeholder="record">
+          <input type="number" min="0" v-model="p.wins" title="Wins" placeholder="W">
+          <input type="number" min="0" v-model="p.draws" title="Draws" placeholder="D">
+          <input type="number" min="0" v-model="p.losses" title="Losses" placeholder="L">
           <button @click="assignSide('white', p)">→ White</button>
           <button @click="assignSide('black', p)">→ Black</button>
           <button class="rowdel" @click="drafts.roster.list.splice(i, 1)">✕</button>
         </div>
-        <div><button class="ghost" @click="drafts.roster.list.push({name:'', photo:'', use_photo:true, rating:'', record:''})">+ Add player</button></div>
+        <div><button class="ghost" @click="drafts.roster.list.push({name:'', photo:'', use_photo:true, rating:'', wins:0, draws:0, losses:0})">+ Add player</button></div>
       </div>
       <div class="savebar">
         <span class="dirty" v-if="dirty.roster">Unsaved changes</span>
@@ -1113,6 +1140,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   const TIERS = ["premier", "major", "regular", "minor"];
   const COLS = ["left", "centre", "right"];
   const KINDS = ["tournament_leaderboard", "meeting_leaderboard", "concurrent_pairings", "results"];
+  const MOVE_KINDS = ["move", "check", "checkmate", "stalemate", "flagfall"];
+  const MOVE_LABELS = { move: "Move", check: "Check", checkmate: "Checkmate", stalemate: "Stalemate", flagfall: "Flagfall" };
   const SLOT_IDS = [
     "left", "left_top", "left_bottom",
     "centre", "centre_top", "centre_bottom",
@@ -1290,7 +1319,10 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     const man = (c.players || {}).manual || {};
     const side = (s) => {
       const p = man[s] || {};
-      return { name: p.name || "", title: p.title || "", rating: p.rating == null ? "" : String(p.rating), record: p.record || "" };
+      return {
+        name: p.name || "", title: p.title || "", rating: p.rating == null ? "" : String(p.rating),
+        wins: Number(p.wins) || 0, draws: Number(p.draws) || 0, losses: Number(p.losses) || 0,
+      };
     };
     return { white: side("white"), black: side("black") };
   }
@@ -1339,7 +1371,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         ? c.players.global_photo_mode : "photos_and_avatars",
       list: (c.players.roster || []).map(p => ({
         name: p.name || "", photo: p.photo || "", use_photo: p.use_photo !== false,
-        rating: p.rating == null ? "" : String(p.rating), record: p.record || "",
+        rating: p.rating == null ? "" : String(p.rating),
+        wins: Number(p.wins) || 0, draws: Number(p.draws) || 0, losses: Number(p.losses) || 0,
       })),
     };
   }
@@ -1383,7 +1416,10 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         volume: toNum(s.volume, 60, 0, 100),
       };
     };
-    return { enabled: !!e.enabled, fr: ev(e.featured_result), or: ev(e.other_results) };
+    const m = e.move_sounds || {};
+    const ms = { enabled: m.enabled !== false, volume: toNum(m.volume, 55, 0, 100) };
+    for (const k of MOVE_KINDS) ms[k] = typeof m[k] === "string" ? m[k] : k;   // default: built-in synth
+    return { enabled: !!e.enabled, fr: ev(e.featured_result), or: ev(e.other_results), ms };
   }
 
   const DRAFTERS = {
@@ -1575,6 +1611,9 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         c.effects.enabled = !!d.enabled;
         c.effects.featured_result = Object.assign({}, c.effects.featured_result, ev(d.fr));
         c.effects.other_results = Object.assign({}, c.effects.other_results, ev(d.or));
+        const ms = Object.assign({}, c.effects.move_sounds, { enabled: !!d.ms.enabled, volume: toNum(d.ms.volume, 55, 0, 100) });
+        for (const k of MOVE_KINDS) ms[k] = String(d.ms[k] || "");
+        c.effects.move_sounds = ms;
         await postConfig("effects", c.effects);      // test counters ride through fresh
         state.cfg = c; rebuildDraft("effects", true);
         toast("Effects saved");
@@ -1586,11 +1625,14 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   async function testEffect(event) {
     try {
       const c = await freshConfig();
-      c.effects.test_event = event === "other_results" ? "other_results" : "featured_result";
+      const ev = (typeof event === "string" && (event === "other_results" || event.indexOf("move:") === 0)) ? event : "featured_result";
+      c.effects.test_event = ev;
       c.effects.test_count = ((Number(c.effects.test_count) || 0) % 1e9) + 1;
       await postConfig("effects", c.effects);
       state.cfg = c;
-      toast(event === "other_results" ? "Zone cue fired on the display" : "Featured cue fired on the display");
+      toast(ev === "other_results" ? "Zone cue fired on the display"
+        : ev.indexOf("move:") === 0 ? MOVE_LABELS[ev.slice(5)] + " cue fired on the display"
+        : "Featured cue fired on the display");
     } catch (e) { toast("Test failed — " + e.message, "err"); }
   }
 
@@ -1598,6 +1640,10 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   function previewEffect(which) {
     const d = drafts.effects && drafts.effects[which];
     if (d && d.sound) SCC.effects.preview(d.sound, toNum(d.volume, 60, 0, 100));
+  }
+  function previewMove(kind) {
+    const ms = drafts.effects && drafts.effects.ms;
+    if (ms && ms[kind]) SCC.effects.preview(ms[kind], toNum(ms.volume, 55, 0, 100));
   }
 
   async function saveMusic() {
@@ -1687,12 +1733,75 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   const cancelPending = () => mutateScenes(sc => { sc.pending_auto = null; }, "Pending auto transition cancelled");
   const setAuto = (on) => mutateScenes(sc => { sc.auto = Object.assign({}, sc.auto, { enabled: !!on }); },
     on ? "Automatic transitions ON (arm delay applies)" : "Automatic transitions OFF");
-  const saveResult = (text) => {
+  // ---- result → records + game end -------------------------------------
+  const RESULT_LABEL = { "1-0": "1–0", "draw": "½–½", "0-1": "0–1" };
+  function resultDelta(code, side) {              // W/D/L to add for a side
+    if (code === "draw") return { w: 0, d: 1, l: 0 };
+    const won = (code === "1-0" && side === "white") || (code === "0-1" && side === "black");
+    return won ? { w: 1, d: 0, l: 0 } : { w: 0, d: 0, l: 1 };
+  }
+  function bumpRecords(players, code, sign) {     // sign +1 apply, -1 undo (clamped ≥0)
+    for (const side of ["white", "black"]) {
+      const p = Object.assign({ wins: 0, draws: 0, losses: 0 }, players.manual[side]);
+      const d = resultDelta(code, side);
+      p.wins = Math.max(0, (Number(p.wins) || 0) + sign * d.w);
+      p.draws = Math.max(0, (Number(p.draws) || 0) + sign * d.d);
+      p.losses = Math.max(0, (Number(p.losses) || 0) + sign * d.l);
+      players.manual[side] = p;
+    }
+  }
+
+  // A result click ends the game: record it against the two players, set the
+  // postgame label, and start the game-end sequence. A rapid second click is
+  // ignored (fat-finger guard); a real correction is Undo then re-click.
+  async function applyResult(code) {
+    if (!RESULT_LABEL[code]) return;
+    const lr = state.cfg && state.cfg.players && state.cfg.players.last_result;
+    if (lr && lr.at && Date.now() - lr.at < 1500) { toast("Clicked twice quickly — ignored. Use Undo to change it."); return; }
+    try {
+      const c = await freshConfig();
+      c.players = c.players || {};
+      c.players.manual = c.players.manual || {};
+      bumpRecords(c.players, code, +1);
+      c.players.last_result = { code, at: Date.now() };
+      await postConfig("players", c.players);
+      state.cfg = c; rebuildDraft("match", true);
+      await mutateScenes((sc) => {
+        sc.scenes = sc.scenes || {};
+        sc.scenes.postgame = Object.assign({}, sc.scenes.postgame, { result_text: RESULT_LABEL[code] });
+        sc.sequence = { name: "game_end", started_at: Date.now() };
+        sc.pending_auto = null;
+      });
+      toast("Result " + RESULT_LABEL[code] + " — records updated, game-end sequence started");
+    } catch (e) { toast("Result failed — " + e.message, "err"); }
+  }
+
+  async function undoResult() {
+    try {
+      const c = await freshConfig();
+      const code = c.players && c.players.last_result && c.players.last_result.code;
+      if (!code) { toast("Nothing to undo"); return; }
+      bumpRecords(c.players, code, -1);
+      c.players.last_result = { code: "", at: 0 };
+      await postConfig("players", c.players);
+      state.cfg = c; rebuildDraft("match", true);
+      await mutateScenes((sc) => {                // reverse the on-air result too, back to game
+        sc.scenes = sc.scenes || {};
+        sc.scenes.postgame = Object.assign({}, sc.scenes.postgame, { result_text: "" });
+        sc.active = "game"; sc.sequence = null; sc.pending_auto = null;
+      });
+      toast("Last result undone — records restored, back to the game scene");
+    } catch (e) { toast("Undo failed — " + e.message, "err"); }
+  }
+
+  // Label only: postgame text without touching records or the sequence
+  // (forfeits, special wording).
+  const setResultLabelOnly = (text) => {
     drafts.result = text;
     return mutateScenes(sc => {
       sc.scenes = sc.scenes || {};
       sc.scenes.postgame = Object.assign({}, sc.scenes.postgame, { result_text: String(text || "").trim() });
-    }, text ? "Postgame result set: " + text : "Postgame result cleared");
+    }, text ? "Postgame label set: " + text : "Postgame label cleared");
   };
 
   // Game-scene bottom strip: a scenes.json key, but operationally a zone
@@ -1944,8 +2053,10 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
           c.players.manual[side] = Object.assign({}, c.players.manual[side], {
             name: d.name.trim(), title: d.title.trim(),
             rating: rating === "" ? null : (/^\d+$/.test(rating) ? Number(rating) : rating),
-            record: d.record.trim(),
-            // photo preserved untouched — arrives with the players stage
+            wins: Math.max(0, Math.round(toNum(d.wins, 0, 0))),
+            draws: Math.max(0, Math.round(toNum(d.draws, 0, 0))),
+            losses: Math.max(0, Math.round(toNum(d.losses, 0, 0))),
+            // photo preserved untouched — set from the roster
           });
         }
         await postConfig("players", c.players);
@@ -2031,7 +2142,9 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
             return {
               name: p.name.trim(), photo: p.photo || "", use_photo: !!p.use_photo,
               rating: rating === "" ? null : (/^\d+$/.test(rating) ? Number(rating) : rating),
-              record: (p.record || "").trim(),
+              wins: Math.max(0, Math.round(toNum(p.wins, 0, 0))),
+              draws: Math.max(0, Math.round(toNum(p.draws, 0, 0))),
+              losses: Math.max(0, Math.round(toNum(p.losses, 0, 0))),
             };
           });
         await postConfig("players", c.players);      // manual white/black preserved from fresh
@@ -2093,8 +2206,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   }
 
   // Copy a roster player into the manual match fields (Live tab). This is an
-  // explicit overwrite of that side, photo included when photo use is on;
-  // the title clears because the roster record carries none.
+  // explicit overwrite of that side — name, rating, W/D/L record and photo
+  // (when photo use is on). The title clears; set it on the Live tab if needed.
   async function assignSide(side, p) {
     try {
       const c = await freshConfig();
@@ -2103,7 +2216,9 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       c.players.manual[side] = Object.assign({}, c.players.manual[side], {
         name: (p.name || "").trim(), title: "",
         rating: rating === "" ? null : (/^\d+$/.test(rating) ? Number(rating) : rating),
-        record: (p.record || "").trim(),
+        wins: Math.max(0, Math.round(toNum(p.wins, 0, 0))),
+        draws: Math.max(0, Math.round(toNum(p.draws, 0, 0))),
+        losses: Math.max(0, Math.round(toNum(p.losses, 0, 0))),
         photo: (p.use_photo && p.photo) ? "/assets/players/" + encodeURIComponent(p.photo) : "",
       });
       await postConfig("players", c.players);
@@ -2379,6 +2494,23 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         return Number.isNaN(s) ? "✕ not a valid time" : "= " + fmtClock(s) + " (" + Math.round(s) + "s)";
       };
 
+      // records: format W/D/L the same as the display (W–D–L / W–L, blank at 0)
+      const fmtWDL = (p) => {
+        const w = Number(p && p.wins) || 0, d = Number(p && p.draws) || 0, l = Number(p && p.losses) || 0;
+        return (w + d + l) > 0 ? SCC.pairingsman.fmtRecord(w, d, l) : "";
+      };
+      const recordPreview = (p) => fmtWDL(p) || "no record yet";
+      const lastResultCode = computed(() =>
+        (state.cfg && state.cfg.players && state.cfg.players.last_result && state.cfg.players.last_result.code) || "");
+      const resultSummary = computed(() => {
+        const man = state.cfg && state.cfg.players && state.cfg.players.manual;
+        if (!man) return "";
+        const one = (side) => (man[side] && man[side].name ? man[side].name : side === "white" ? "White" : "Black")
+          + " " + (fmtWDL(man[side]) || "0–0");
+        const base = one("white") + "   ·   " + one("black");
+        return lastResultCode.value ? "Recorded " + RESULT_LABEL[lastResultCode.value] + " — " + base + " (Undo to reverse)" : base;
+      });
+
       function fmtCountdown(ms) {
         const s = Math.max(0, ms) / 1000;
         if (s >= 90) return Math.floor(s / 60) + "m " + Math.round(s % 60) + "s";
@@ -2398,7 +2530,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       poll();
 
       return {
-        SCENES, TTYPES, DIRS, TIERS, COLS, tabs: TABS,
+        SCENES, TTYPES, DIRS, TIERS, COLS, MOVE_KINDS, MOVE_LABELS, tabs: TABS,
         cfg, st, beatOk, pendingAuto, autoEnabled, seqCfg, seqInfo, effectiveHostLabel, pgnStatusLabel,
         apiOk: computed(() => state.apiOk),
         now: computed(() => state.now),
@@ -2408,7 +2540,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         assets: computed(() => state.assets),
         drafts, errs, toasts, dirty, diskChanged, tabDirty,
         switchTab, revert, fmtCountdown, fmtBytes, chapterPreview, configuredVideoMissing,
-        setScene, startSeq, stopSeq, cancelPending, setAuto, setDemo, saveResult,
+        setScene, startSeq, stopSeq, cancelPending, setAuto, setDemo,
+        applyResult, undoResult, setResultLabelOnly, lastResultCode, resultSummary, recordPreview,
         saveEvent, saveBoard, saveTrans, saveInter, saveMatch, loadVideos,
         zoneScene, stripOn, colDimmed, colSlotIds, slotLabel, activeSlotCount,
         setStrip, saveSponsors, saveZones, saveFunder, saveRoster, assignSide,
@@ -2416,7 +2549,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         setMusicEnabled, setMusicShuffle, reshuffleMusic, skipMusic, setMusicVolume,
         musicVolShown, musicNowLabel, musicPill, rescanMusic, saveMusic,
         deleteMusicFile, musicOnDisk, musicFileMeta,
-        saveEffects, testEffect, previewEffect, sfxFiles, sfxMissing,
+        saveEffects, testEffect, previewEffect, previewMove, sfxFiles, sfxMissing,
         PM_FIELDS, PM_LABELS, pmStatusLabel, pmPreview, pmPulled, pmManual,
         savePairingsman, fetchPmPreview,
         boardDiag, feedDiag, bumpResync, bumpRestart,
