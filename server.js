@@ -158,7 +158,7 @@ const CONFIG_DEFAULTS = {
     },
     sequences: {
       game_start: { versus_ms: 8000 },
-      game_end: { postgame_ms: 40000, start_ms: 150000 },
+      game_end: { postgame_ms: 40000 },  // postgame → intermission; no start stop
     },
   },
 
@@ -486,8 +486,31 @@ function readBody(req, res, cb, limit) {
 // heartbeat (~1s: detector state, confidence, effective scene, connection flags)
 // and the admin polls it. Kept out of the config store so status churn never
 // invalidates the config hash or triggers the display's own poll loop.
-let DISPLAY_STATUS = null;
-let DISPLAY_STATUS_AT = 0;
+//
+// PER INSTANCE: two open displays (OBS + a preview tab, or a ?music=0 second
+// source) used to overwrite ONE slot in turn, so every admin label flapped
+// once a second between the two views. Each heartbeat now carries an
+// instance id; GET merges: the freshest heartbeat is the base, and the music
+// / effects audio state comes from the freshest instance that OWNS audio
+// (not ?music=0-muted) — one steady view no matter how many displays exist.
+const DISPLAY_STATUSES = new Map();      // instance id → { status, at }
+const STATUS_TTL_MS = 10000;             // an instance that stops posting drops out
+
+function mergedStatus() {
+  const now = Date.now();
+  for (const [id, e] of DISPLAY_STATUSES) if (now - e.at > STATUS_TTL_MS) DISPLAY_STATUSES.delete(id);
+  if (!DISPLAY_STATUSES.size) return { status: null, age_ms: null };
+  const all = [...DISPLAY_STATUSES.values()].sort((a, b) => b.at - a.at);
+  const base = all[0];
+  const status = Object.assign({}, base.status);
+  const audioOwner = all.find(e => e.status && e.status.music && e.status.music.inert !== true);
+  if (audioOwner && audioOwner !== base) {
+    status.music = audioOwner.status.music;
+    status.effects = audioOwner.status.effects;
+  }
+  status.instances = all.length;
+  return { status, age_ms: now - base.at };
+}
 
 /* ---------------------------------------------------------- PGN source
    The display cannot fetch LiveChess's HTTP endpoints itself (no CORS
@@ -591,8 +614,8 @@ function handleApi(req, res, pathname) {
         try {
           const parsed = JSON.parse(buf.toString("utf8"));
           if (!isPlainObject(parsed)) return sendError(res, 400, "status must be a JSON object");
-          DISPLAY_STATUS = parsed;
-          DISPLAY_STATUS_AT = Date.now();
+          const id = typeof parsed.instance === "string" && parsed.instance ? parsed.instance : "solo";
+          DISPLAY_STATUSES.set(id, { status: parsed, at: Date.now() });
           return sendJSON(res, 200, { ok: true });
         } catch {
           return sendError(res, 400, "invalid JSON");
@@ -600,11 +623,8 @@ function handleApi(req, res, pathname) {
       });
     }
     if (req.method === "GET") {
-      return sendJSON(res, 200, {
-        ok: true,
-        status: DISPLAY_STATUS,
-        age_ms: DISPLAY_STATUS ? Date.now() - DISPLAY_STATUS_AT : null,
-      });
+      const m = mergedStatus();
+      return sendJSON(res, 200, { ok: true, status: m.status, age_ms: m.age_ms });
     }
   }
 

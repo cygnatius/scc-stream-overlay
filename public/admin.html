@@ -285,7 +285,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       <h2>Sequences &amp; automatic transitions</h2>
       <div class="btns">
         <button @click="startSeq('game_start')">▶ Game start <small style="font-weight:400">(versus {{ (seqCfg.game_start.versus_ms/1000).toFixed(0) }}s → game)</small></button>
-        <button @click="startSeq('game_end')">▶ Game end <small style="font-weight:400">(postgame {{ (seqCfg.game_end.postgame_ms/1000).toFixed(0) }}s → start {{ (seqCfg.game_end.start_ms/1000).toFixed(0) }}s → intermission)</small></button>
+        <button @click="startSeq('game_end')">▶ Game end <small style="font-weight:400">(postgame {{ (seqCfg.game_end.postgame_ms/1000).toFixed(0) }}s → intermission)</small></button>
       </div>
       <div class="seqrow" v-if="seqInfo">
         <div class="seqprog">Running <b>{{ seqInfo.name }}</b> — {{ seqInfo.text }}</div>
@@ -488,6 +488,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         <div class="row" v-if="boardDiag.d"><span class="k">Physical board</span><span class="v mono" :class="{bad: boardDiag.mismatch}">{{ boardDiag.d.board_placement || '—' }}</span></div>
         <div class="row" v-if="boardDiag.d"><span class="k">Recoveries this session</span><span class="v">{{ boardDiag.d.resyncs }} automatic · {{ boardDiag.d.forced }} manual · {{ boardDiag.d.deep_hits }} gaps reconstructed · {{ boardDiag.d.unexplained }} positions held</span></div>
         <div class="row"><span class="k">Feed</span><span class="v" :class="feedDiag.cls">{{ feedDiag.label }}</span></div>
+        <div class="row" v-if="clockDiag"><span class="k">Clock feed</span><span class="v mono">{{ clockDiag }}</span></div>
         <div class="row" v-if="feedDiag.d"><span class="k">Dropouts recovered</span><span class="v">{{ feedDiag.d.reconnects }} reconnect(s) · {{ feedDiag.d.silent_recycles }} silent feed(s) recycled · {{ boardDiag.d ? boardDiag.d.gap_adopts : 0 }} board(s) picked back up<span v-if="boardDiag.d && boardDiag.d.restored"> · {{ boardDiag.d.restored }} move list(s) restored after a reload</span></span></div>
       </div>
       <div class="btns" style="margin-top:12px">
@@ -565,8 +566,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       <h3>Sequence timings</h3>
       <div class="frm">
         <div class="f"><label>Game start: versus dwell</label><div class="unit"><input type="number" min="1" step="1" v-model="drafts.trans.seq.versus_s"><span>s, then game</span></div></div>
-        <div class="f"><label>Game end: postgame dwell</label><div class="unit"><input type="number" min="1" step="1" v-model="drafts.trans.seq.postgame_s"><span>s</span></div></div>
-        <div class="f"><label>Game end: start dwell</label><div class="unit"><input type="number" min="1" step="1" v-model="drafts.trans.seq.start_s"><span>s, then intermission</span></div></div>
+        <div class="f"><label>Game end: postgame dwell</label><div class="unit"><input type="number" min="1" step="1" v-model="drafts.trans.seq.postgame_s"><span>s, then intermission</span></div></div>
         <div class="f"><label>Auto transition arm delay</label><div class="unit"><input type="number" min="1" step="1" v-model="drafts.trans.arm_s"><span>s cancel window</span></div></div>
       </div>
 
@@ -1297,7 +1297,6 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       seq: {
         versus_s: ((q.game_start || {}).versus_ms ?? 8000) / 1000,
         postgame_s: ((q.game_end || {}).postgame_ms ?? 40000) / 1000,
-        start_s: ((q.game_end || {}).start_ms ?? 150000) / 1000,
       },
       arm_s: ((sc.auto || {}).arm_delay_ms ?? 4000) / 1000,
     };
@@ -1719,8 +1718,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       const t = (sc.sequences || {})[seq.name] || {};
       if (seq.name === "game_start") return el < (t.versus_ms ?? 8000) ? "versus" : "game";
       if (seq.name === "game_end") {
-        const p = t.postgame_ms ?? 40000, s = t.start_ms ?? 150000;
-        return el < p ? "postgame" : el < p + s ? "start" : "intermission";
+        return el < (t.postgame_ms ?? 40000) ? "postgame" : "intermission";
       }
     }
     return SCENES.includes(sc.active) ? sc.active : "game";
@@ -1999,10 +1997,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         }
         sc.sequences = {
           game_start: { versus_ms: Math.round(toNum(d.seq.versus_s, 8, 1) * 1000) },
-          game_end: {
-            postgame_ms: Math.round(toNum(d.seq.postgame_s, 40, 1) * 1000),
-            start_ms: Math.round(toNum(d.seq.start_s, 150, 1) * 1000),
-          },
+          game_end: { postgame_ms: Math.round(toNum(d.seq.postgame_s, 40, 1) * 1000) },
         };
         sc.auto = Object.assign({}, sc.auto, { arm_delay_ms: Math.round(toNum(d.arm_s, 4, 1) * 1000) });
         await postConfig("scenes", sc);
@@ -2240,7 +2235,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         const q = (state.cfg && state.cfg.scenes.sequences) || {};
         return {
           game_start: { versus_ms: (q.game_start || {}).versus_ms ?? 8000 },
-          game_end: { postgame_ms: (q.game_end || {}).postgame_ms ?? 40000, start_ms: (q.game_end || {}).start_ms ?? 150000 },
+          game_end: { postgame_ms: (q.game_end || {}).postgame_ms ?? 40000 },
         };
       });
 
@@ -2257,12 +2252,11 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
             text: el < v ? `versus — ${fmtCountdown(v - el)} left → game` : "handing over to game…",
           };
         }
-        const p = q.game_end.postgame_ms, s = q.game_end.start_ms;
-        let text;
-        if (el < p) text = `postgame — ${fmtCountdown(p - el)} left → start → intermission`;
-        else if (el < p + s) text = `start — ${fmtCountdown(p + s - el)} left → intermission`;
-        else text = "handing over to intermission…";
-        return { name: "game end", text };
+        const p = q.game_end.postgame_ms;
+        return {
+          name: "game end",
+          text: el < p ? `postgame — ${fmtCountdown(p - el)} left → intermission` : "handing over to intermission…",
+        };
       });
 
       /* ---- Pairingsman tab ---- */
@@ -2357,6 +2351,17 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         if (d.silent) return { d, label: "connected but silent — reconnecting", cls: "bad" };
         const secs = age == null ? null : (age / 1000).toFixed(1);
         return { d, label: secs == null ? "waiting for the first board message" : "live, last board message " + secs + "s ago", cls: "ok" };
+      });
+
+      // Raw clock feed line — so a wrong ticking side is diagnosable from the
+      // venue instead of guessed at afterwards.
+      const clockDiag = computed(() => {
+        const c = state.st && state.st.feed && state.st.feed.clock;
+        if (!beatOk.value || !c) return "";
+        return "white " + c.w + " · black " + c.b
+          + " · run " + JSON.stringify(c.run) + " (" + c.run_type + (c.saw_run ? ", trusted" : ", inferring") + ")"
+          + " · last press " + (c.last_changed === "w" ? "white" : c.last_changed === "b" ? "black" : "—")
+          + " · ticking " + (c.side === "w" ? "white" : c.side === "b" ? "black" : "nobody");
       });
 
       /* ---- ticker preview (first active message, real speed) ---- */
@@ -2552,7 +2557,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         saveEffects, testEffect, previewEffect, previewMove, sfxFiles, sfxMissing,
         PM_FIELDS, PM_LABELS, pmStatusLabel, pmPreview, pmPulled, pmManual,
         savePairingsman, fetchPmPreview,
-        boardDiag, feedDiag, bumpResync, bumpRestart,
+        boardDiag, feedDiag, clockDiag, bumpResync, bumpRestart,
         tickerPreview, saveTicker, addTickerMsg, flashTicker,
       };
     },

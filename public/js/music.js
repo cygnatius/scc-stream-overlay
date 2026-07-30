@@ -291,6 +291,7 @@ SCC.music = (function () {
   function status() {
     return {
       state,
+      inert,                             // ?music=0 — the server picks the audio OWNER's status
       file: current || null,
       index: current ? order.indexOf(current) + 1 : 0,
       of: order.length,

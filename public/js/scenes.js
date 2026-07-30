@@ -66,9 +66,11 @@ SCC.scenes = (function () {
         return { scene: "game", done: true };
       }
       if (seq.name === "game_end") {
-        const p = num(t.postgame_ms, 40000), s = num(t.start_ms, 150000);
+        // postgame → intermission, nothing in between (the start-scene stop
+        // that used to sit here was cut on operator instruction). A legacy
+        // start_ms in an old scenes.json is deliberately ignored.
+        const p = num(t.postgame_ms, 40000);
         if (el < p) return { scene: "postgame", done: false };
-        if (el < p + s) return { scene: "start", done: false };
         return { scene: "intermission", done: true };
       }
     }
@@ -333,12 +335,18 @@ SCC.scenes = (function () {
 
   /* ------------------------------------------------- status heartbeat */
 
+  // Per-page-load instance id: with two displays open (OBS + a preview tab)
+  // the server keeps both heartbeats apart instead of one overwriting the
+  // other every second — that overwrite was the admin's flapping labels.
+  const INSTANCE = "d-" + Math.random().toString(36).slice(2, 10);
+
   async function postStatus() {
     try {
       await fetch("/api/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          instance: INSTANCE,
           at: Date.now(),
           scene: view.current,
           sequence: view.seqName,
@@ -372,6 +380,7 @@ SCC.scenes = (function () {
             silent_recycles: SCC.livechess.diag.silentRecycles,
             last_msg_age_ms: SCC.livechess.diag.lastMsgAgeMs,
             silent: SCC.livechess.diag.silent,
+            clock: SCC.livechess.diag.clock || null,
           } : null,
           pairingsman: window.SCC.pairingsman
             ? { status: SCC.pairingsman.state.status, entity: SCC.pairingsman.state.entity, fetched_at: SCC.pairingsman.state.fetchedAt }

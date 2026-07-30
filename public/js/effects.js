@@ -95,11 +95,15 @@ SCC.effects = (function () {
       note(c, 523.25, t, vol * 0.5, 0.16, "triangle");
       note(c, 784.0, t + 0.05, vol * 0.35, 0.18, "triangle");
     },
-    // ---- move cues (chess.com-flavoured, tuned quiet) ----
-    move(c, vol) {                       // soft woody tock on a normal move
+    // ---- move cues (chess.com-flavoured) ----
+    // The move knock must survive stream compression and laptop speakers:
+    // the first cut (180 Hz, 0.11 s) fired fine but was inaudible on air —
+    // sub-bass with no transient. This one is a click + midrange body.
+    move(c, vol) {                       // woody knock on a normal move
       const t = c.currentTime + 0.01;
-      note(c, 180, t, vol * 0.6, 0.11, "triangle");
-      note(c, 240, t + 0.014, vol * 0.32, 0.09, "sine");
+      note(c, 1100, t, vol * 0.35, 0.03, "square");   // click transient
+      note(c, 620, t, vol * 0.75, 0.09, "square");    // knock
+      note(c, 310, t, vol * 0.95, 0.22, "triangle");  // body
     },
     check(c, vol) {                      // bright rising alert
       const t = c.currentTime + 0.01;
@@ -244,7 +248,10 @@ SCC.effects = (function () {
   /* ------------------------------------------------------------- status */
 
   function status() {
-    return { audio: blocked ? "blocked" : (ctx && ctx.state === "running" ? "ready" : "idle") };
+    return {
+      audio: blocked ? "blocked" : (ctx && ctx.state === "running" ? "ready" : "idle"),
+      inert: audioInert,                 // matches music: the server prefers the audio owner
+    };
   }
 
   /* --------------------------------------------------------------- init */

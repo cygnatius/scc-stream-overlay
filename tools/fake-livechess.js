@@ -58,6 +58,8 @@ function boardMsg() {
     if (clockOv.b != null) b = clockOv.b;
     if (clockOv.run === "0") run = false;         // force stopped (never-asserts-run hardware)
     else if (clockOv.run === "1") run = true;     // force running
+    else if (clockOv.run === "w") run = 1;        // firmware style that NAMES the side:
+    else if (clockOv.run === "b") run = 2;        // 1 = white running, 2 = black running
   }
   return JSON.stringify({
     response: "call", id: 1,
