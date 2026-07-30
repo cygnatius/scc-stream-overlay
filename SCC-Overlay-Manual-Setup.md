@@ -77,9 +77,9 @@ it.
   ending. Gold = on air now. Switching manually always works and cancels any
   running sequence.
 - **Sequences** — *Game start* plays versus for 8 s then lands on the game;
-  *Game end* plays postgame 40 s → start 150 s → intermission. Timings are in
-  the Transitions tab. A live readout counts the current phase down, and
-  **Stop here** freezes on whatever is showing.
+  *Game end* plays postgame for 40 s then goes straight to intermission.
+  Timings are in the Transitions tab. A live readout counts the current phase
+  down, and **Stop here** freezes on whatever is showing.
 - **Automatic switching** (optional, off by default) — the board itself
   proposes game start / game end (first move played; mate/stalemate; both
   kings placed on the centre squares). Every proposal shows at the top with a

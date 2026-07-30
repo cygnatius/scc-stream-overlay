@@ -84,6 +84,21 @@ SCC.livechess = (function () {
      the feed shows that clock positive again (a new game or a clock reset).  */
   let sawRunTrue = false;
   const flagged = { w: false, b: false };
+  // The side whose clock value changed at the LAST move-end sync. The player
+  // who just pressed is NOT the one running — so the runner is the OTHER
+  // side. This beats game.toMove, which is a guess after any mid-game
+  // adoption (dropout, reload) and froze the thinking player's clock — the
+  // venue saw black's clock stand still through whole thinks. Cleared when
+  // it means nothing: fresh connection, new game, both values moving at once.
+  let lastChangedSide = null;
+
+  // Some LiveChess builds report run as a BOOLEAN, others as 0|1|2 (or
+  // "white"/"black") NAMING the running side. Use the side when it's named.
+  function runnerFromRun(r) {
+    if (r === 1 || r === "1" || r === "white" || r === "w") return "w";
+    if (r === 2 || r === "2" || r === "black" || r === "b") return "b";
+    return null;                         // boolean-style or absent: no side info
+  }
 
   function noteFeedClock(side, s) {      // s: seconds from a real feed change
     if (s == null) return;
@@ -124,6 +139,7 @@ SCC.livechess = (function () {
     LC_LAST_W = undefined; LC_LAST_B = undefined;
     clockResyncPending = true;
     sawRunTrue = false;                        // re-learn this board's run semantics on reconnect
+    lastChangedSide = null;
   }
 
   /* Silence watchdog. `ws` staying open is not proof the feed is alive, so a
@@ -185,7 +201,13 @@ SCC.livechess = (function () {
       // placed on the centre squares) is exactly the kind of unreachable
       // placement the move engine deliberately holds and hides.
       lastMsgAt = Date.now();
-      if (b.board) { game.rawPlacement = String(b.board).split(" ")[0]; SCC.moves.applyPlacement(b.board, LC_SERIAL); }
+      if (b.board) {
+        game.rawPlacement = String(b.board).split(" ")[0];
+        // pieces back on the start squares = a new game: last move-end info
+        // belongs to the previous one
+        if (game.rawPlacement === SCC.moves.START_PLACEMENT) lastChangedSide = null;
+        SCC.moves.applyPlacement(b.board, LC_SERIAL);
+      }
       if (b.clock) {
         // First message after a connect: take the feed's clocks as they stand.
         // Done before the change-detection below so this doesn't count as a
@@ -197,21 +219,41 @@ SCC.livechess = (function () {
           // clock that was already down when we reconnected)
           if (w0 != null) { game.white.sec = w0; LC_LAST_W = b.clock.white; flagged.w = w0 <= 0; }
           if (b0 != null) { game.black.sec = b0; LC_LAST_B = b.clock.black; flagged.b = b0 <= 0; }
+          lastChangedSide = null;        // values re-read across a gap say nothing about who runs
         }
         // the feed only changes these at move-end; sync ONLY on a real change so the
         // local per-second countdown isn't reset back every poll. A real change is
         // also the only place flagfall is judged — see noteFeedClock.
-        if (b.clock.white !== LC_LAST_W) { LC_LAST_W = b.clock.white; const s = SCC.clock.lcClockSec(b.clock.white); if (s != null) { game.white.sec = s; SCC.moves.syncClock("w", s); noteFeedClock("w", s); } }
-        if (b.clock.black !== LC_LAST_B) { LC_LAST_B = b.clock.black; const s = SCC.clock.lcClockSec(b.clock.black); if (s != null) { game.black.sec = s; SCC.moves.syncClock("b", s); noteFeedClock("b", s); } }
-        // Tick the side to move. Prefer the feed's own run flag; if this board
-        // never asserts it, infer from game state so the clock still ticks
-        // smoothly (see the clock/flagfall note above). Pre-game stays quiet
-        // via game.started; a finished game stops.
+        let wChanged = false, bChanged = false;
+        if (b.clock.white !== LC_LAST_W) { LC_LAST_W = b.clock.white; const s = SCC.clock.lcClockSec(b.clock.white); if (s != null) { game.white.sec = s; SCC.moves.syncClock("w", s); noteFeedClock("w", s); wChanged = true; } }
+        if (b.clock.black !== LC_LAST_B) { LC_LAST_B = b.clock.black; const s = SCC.clock.lcClockSec(b.clock.black); if (s != null) { game.black.sec = s; SCC.moves.syncClock("b", s); noteFeedClock("b", s); bChanged = true; } }
+        if (wChanged && bChanged) lastChangedSide = null;      // both moved: adjust/reset, no side info
+        else if (wChanged) lastChangedSide = "w";
+        else if (bChanged) lastChangedSide = "b";
+        // WHICH clock ticks — from the best signal the feed gives, in order:
+        //  1. run NAMES the side (0|1|2 / "white"/"black" firmware) → that side.
+        //  2. run is boolean-true → the OPPOSITE of the last side whose value
+        //     changed: whoever just pressed isn't running. Immune to a wrong
+        //     game.toMove after an adopted position (the black-freeze bug).
+        //  3. no change seen yet this connection → game.toMove.
+        // A board that never asserts run at all falls back to inference from
+        // game state (started, not over), same side resolution.
         if (b.clock.run) sawRunTrue = true;
-        const running = sawRunTrue
+        const believedRunning = sawRunTrue
           ? !!b.clock.run
           : (game.started && !SCC.moves.gameStatus().over);
-        game.clockRunSide = running ? game.toMove : null;
+        const named = runnerFromRun(b.clock.run);
+        game.clockRunSide = !believedRunning ? null
+          : named ? named
+          : lastChangedSide ? (lastChangedSide === "w" ? "b" : "w")
+          : game.toMove;
+        diag.clock = {
+          w: b.clock.white, b: b.clock.black,
+          run: b.clock.run === undefined ? null : b.clock.run,
+          run_type: typeof b.clock.run,
+          saw_run: sawRunTrue, last_changed: lastChangedSide,
+          side: game.clockRunSide,
+        };
       }
     };
     ws.onclose = () => {
