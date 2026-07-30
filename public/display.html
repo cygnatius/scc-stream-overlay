@@ -374,7 +374,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 .zrow{font-family:'Figtree',sans-serif;font-weight:600;font-size:18px;color:var(--cream);
   font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-/* matches run sheet (zone source "matches") — the night's games, feature
+/* matches run sheet (zone source "matches") — the meet's games, feature
    (DGT) rows distinguished by the gold edge + tag. Same quiet look as the
    data block; nothing here touches the preserved game selectors. */
 .zmatches{flex:1;min-height:132px;margin:12px;display:flex;flex-direction:column;gap:8px;
@@ -562,7 +562,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
         <div class="sh-event" v-text="eventTitle"></div>
         <div class="sh-season" v-if="general.season" v-text="general.season"></div>
       </div>
-      <div class="sh-line" v-if="startTimesLine">Tonight&nbsp; <b v-text="startTimesLine"></b></div>
+      <div class="sh-line" v-if="startTimesLine">This meet&nbsp; <b v-text="startTimesLine"></b></div>
       <div class="sh-line sh-feature" v-for="(fl, i) in featureLines" :key="i" v-text="fl"></div>
       <div class="sh-site" v-text="general.website"></div>
     </div>

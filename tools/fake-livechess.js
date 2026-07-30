@@ -88,7 +88,7 @@ const game2 = '[Event "Fake Open"]\n[White "Other A"]\n[Black "Other B"]\n[Resul
 
 function pgnFile() {
   const sans = SCRIPT.slice(0, played).map(m => m.san);
-  const head = '[Event "Fake Club Night"]\n[White "John Smith"]\n[Black "Jane Doe"]\n[Result "*"]\n\n';
+  const head = '[Event "Fake Club Meet"]\n[White "John Smith"]\n[Black "Jane Doe"]\n[Result "*"]\n\n';
   if (mode === "agree") return head + movetext(sans, PGN_SPENT, true, -1) + "\n" + game2;
   if (mode === "clkless") return head + movetext(sans, PGN_SPENT, true, 3) + "\n" + game2;   // ply 3 unclocked
   if (mode === "diverge") {

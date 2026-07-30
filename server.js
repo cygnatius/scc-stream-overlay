@@ -215,7 +215,7 @@ const CONFIG_DEFAULTS = {
   },
 
   matches: {
-    // The night's run sheet: matches staged ahead of time and advertised in
+    // The meet's run sheet: matches staged ahead of time and advertised in
     // any zone slot with source "matches" (start/versus/postgame bands, game
     // side panel or strip). Players are ROSTER names (players.json roster).
     // One click on an on_dgt match loads its players into the live area and

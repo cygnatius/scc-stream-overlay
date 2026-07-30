@@ -35,8 +35,8 @@ SCC.zones = (function () {
   const TIERS = ["premier", "major", "regular", "minor"];
   const KIND_LABEL = {
     tournament_leaderboard: "Tournament standings",
-    meeting_leaderboard: "Tonight’s standings",
-    concurrent_pairings: "Also playing tonight",
+    meeting_leaderboard: "This meet’s standings",
+    concurrent_pairings: "Also playing this meet",
     results: "Results",
   };
 
@@ -75,7 +75,7 @@ SCC.zones = (function () {
     if (!s || !s.active) return null;
 
     // The matches run sheet (config/matches.json): upcoming / live / finished
-    // matches of the night, feature (DGT) games distinguished. Only matches
+    // matches of the meet, feature (DGT) games distinguished. Only matches
     // the operator marked `show` render; none shown = the slot renders
     // nothing at all — never a placeholder on air.
     if (s.source === "matches") {
@@ -93,7 +93,7 @@ SCC.zones = (function () {
           material: m.status === "live" ? (m.material || "") : "",
         }));
       if (!rows.length) return null;
-      return { kind: "matches", id, cap: s.data_title || "Tonight’s matches", rows };
+      return { kind: "matches", id, cap: s.data_title || "This meet’s matches", rows };
     }
 
     if (s.source === "data") {

@@ -319,8 +319,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     </div>
 
     <div class="card">
-      <h2>Matches — tonight’s run sheet</h2>
-      <p class="sub">Stage the night’s games here, players picked from the <b>roster</b> (Players tab). Tick <b>show</b> to advertise a match in any zone slot set to “Matches — run sheet” (Sponsors &amp; Zones) — on the start / versus / postgame bands and beside or under the game. <b>DGT</b> marks a game that will run on the board: its <b>▶ Go live</b> loads both players into the live area and starts the game-start sequence in one click, and the result buttons above then complete it on this sheet automatically. Non-DGT games are tracked by hand — status, result when done, and an optional “material” note while live (e.g. <i>White +2</i>).</p>
+      <h2>Matches — the meet’s run sheet</h2>
+      <p class="sub">Stage the meet’s games here, players picked from the <b>roster</b> (Players tab). Tick <b>show</b> to advertise a match in any zone slot set to “Matches — run sheet” (Sponsors &amp; Zones) — on the start / versus / postgame bands and beside or under the game. <b>DGT</b> marks a game that will run on the board: its <b>▶ Go live</b> loads both players into the live area and starts the game-start sequence in one click, and the result buttons above then complete it on this sheet automatically. Non-DGT games are tracked by hand — status, result when done, and an optional “material” note while live (e.g. <i>White +2</i>).</p>
       <div class="rows">
         <div class="mtrow" v-for="(m, i) in drafts.matches.list" :key="m.id || i">
           <label class="chk" title="This game runs on the DGT board"><input type="checkbox" v-model="m.on_dgt"> DGT</label>
@@ -967,7 +967,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
                 <option value="matches">Matches — run sheet</option>
               </select>
               <template v-if="drafts.zones.slots[id].srcSel === 'matches'">
-                <input type="text" v-model="drafts.zones.slots[id].data_title" placeholder="Card title (Tonight’s matches)">
+                <input type="text" v-model="drafts.zones.slots[id].data_title" placeholder="Card title (This meet’s matches)">
                 <span class="hint" style="font-size:12px">Shows the run sheet from Live → Matches (only matches marked “show”).</span>
               </template>
               <template v-if="String(drafts.zones.slots[id].srcSel).startsWith('tier:')">
