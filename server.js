@@ -50,7 +50,7 @@ const ZONE_SLOT_IDS = [
 function defaultZoneSlot() {
   return {
     active: false,                       // every slot OFF by default: overlay renders as today
-    source: "sponsors",                  // sponsors | data ("sponsors" with no tier = advertise-here invite)
+    source: "sponsors",                  // sponsors | data | matches ("sponsors" with no tier = advertise-here invite)
     tier: "",                            // premier | major | regular | minor | "" (unassigned)
     rotate_ms: 8000,                     // sponsor rotation frequency
     show: "both",                        // image | message | both
@@ -212,6 +212,18 @@ const CONFIG_DEFAULTS = {
     // undone. Cleared by Undo; a fresh click just overwrites it.
     last_result: { code: "", at: 0 },    // code: "" | "1-0" | "draw" | "0-1"
     roster: [],                          // { name, photo, use_photo, rating, wins, draws, losses }
+  },
+
+  matches: {
+    // The night's run sheet: matches staged ahead of time and advertised in
+    // any zone slot with source "matches" (start/versus/postgame bands, game
+    // side panel or strip). Players are ROSTER names (players.json roster).
+    // One click on an on_dgt match loads its players into the live area and
+    // starts the game-start sequence; the result buttons complete it.
+    matches: [],                         // { id, white, black, label, on_dgt, show,
+                                         //   status: upcoming|live|done,
+                                         //   result: ""|"1-0"|"draw"|"0-1",
+                                         //   material: "" }  — staged order = display order
   },
 
   pairingsman: {

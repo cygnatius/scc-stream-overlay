@@ -232,9 +232,11 @@ SCC.effects = (function () {
     return manual;
   }
 
-  // Data zones the CURRENT scene actually renders — mirrors display markup.
-  // Reactive reads (scene, cfg.loaded) come before every early return, or
-  // the watcher would freeze on its first value (bitten twice before).
+  // Data + matches zones the CURRENT scene actually renders — mirrors the
+  // display markup. Matches rows serialise to lines so the same differ works:
+  // a result landing or a status flip on the run sheet pulses and cues like
+  // any other result update. Reactive reads (scene, cfg.loaded) come before
+  // every early return, or the watcher would freeze (bitten twice before).
   function visibleDataZones() {
     const scene = SCC.scenes.view.current;
     if (!cfg.loaded) return [];
@@ -242,7 +244,11 @@ SCC.effects = (function () {
     if (scene === "intermission") list = [];
     else if (scene === "game") list = SCC.zones.gameSideZones().concat(SCC.zones.gameStripZones());
     else list = SCC.zones.bandZones();
-    return list.filter(z => z.kind === "data").map(z => ({ id: z.id, cap: z.cap, lines: z.lines }));
+    return list.filter(z => z.kind === "data" || z.kind === "matches").map(z => ({
+      id: z.id, cap: z.cap,
+      lines: z.kind === "data" ? z.lines
+        : z.rows.map(r => [r.white.name, r.black.name, r.status, r.result, r.material].join("|")),
+    }));
   }
 
   /* ------------------------------------------------------------- status */

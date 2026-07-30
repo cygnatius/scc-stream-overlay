@@ -30,6 +30,19 @@ the match fields, photo and record included. Photos upload here (or drop
 files into `assets/players/` and Rescan). The **photo policy** picks photos +
 initials avatars, photos only, or no photos at all.
 
+**Live tab → Matches (the run sheet)** — stage the night's games ahead of
+time, players picked from the roster by dropdown. Per match: **DGT** (it will
+run on the board), **show** (advertise it in the zones), a status (upcoming /
+in progress / complete), the result once complete, an optional label
+("Championship Bd 1"), and — while in progress — an optional material note
+("White +2"). Point any zone slot at **Matches — run sheet** (Sponsors &
+Zones) and the staged games appear on the start / versus / postgame bands and
+beside the game, feature (DGT) games distinguished with the gold edge and tag,
+records shown from the roster. When the main event begins, press **▶ Go live**
+on its row: the two players load into the live area automatically and the
+game-start sequence runs — then the result buttons complete that match on the
+sheet (and Undo puts it back).
+
 **Sponsors & Zones tab** — sponsor records (name, tier, logo, message) and
 the zone layout: left / centre / right, each whole or split top + bottom.
 Open scenes (start, versus, postgame, ending) show every column as a bottom

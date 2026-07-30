@@ -74,6 +74,17 @@ and an optional standing label are all configurable.
   The overlay is fully operable with Pairingsman absent — auto degrades to
   the manual values whenever the payload is null or unreachable.
 
+## The matches run sheet
+
+Stage the night's games (Admin → Live → **Matches**), players picked from the
+roster: which game runs on the **DGT board**, which are side games, each with
+a status — upcoming, in progress (with an optional "White +2" material note),
+or complete with its result. Any zone slot set to **Matches — run sheet**
+advertises them across the scenes, the featured DGT game distinguished, W–D–L
+records shown from the roster. **▶ Go live** on the feature match loads both
+players into the live area and starts the game-start sequence in one click,
+and the result buttons then complete it on the sheet.
+
 ## Background music
 
 The display can play a looping music bed (Admin → **Music**): upload audio
