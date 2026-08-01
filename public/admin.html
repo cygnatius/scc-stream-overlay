@@ -252,6 +252,12 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       <button @click="setDemo(false)">Turn off</button>
     </div>
 
+    <!-- the overlay code was updated while edits were unsaved -->
+    <div class="pending" v-if="updateReady">
+      <span><b>The overlay was updated</b> — this page is still running the old build. It didn’t reload itself because a tab has unsaved changes; save or discard them, then reload.</span>
+      <button class="cancelbtn" @click="reloadPage">Reload now</button>
+    </div>
+
     <!-- cancellable pending automatic transition -->
     <div class="pending" v-if="pendingAuto">
       <span>Auto transition pending: <b>{{ pendingAuto.action === 'game_start' ? 'game start sequence' : 'game end sequence' }}</b>
@@ -319,8 +325,45 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     </div>
 
     <div class="card">
+      <h2>Match — manual players</h2>
+      <p class="sub">Drives the player cards on the game, versus and postgame scenes. The record is wins / draws / losses — shown as <b>W–D–L</b> (“4–1–2”) or <b>W–L</b> when there are no draws (“1–4”); 0/0/0 shows nothing. The result buttons above bump these.</p>
+      <div class="match">
+        <div v-for="side in ['white','black']" :key="side">
+          <div class="colhead">{{ side === 'white' ? 'White' : 'Black' }} <span style="font-weight:400;color:var(--cream-dim);font-size:14px">— {{ recordPreview(drafts.match[side]) }}</span></div>
+          <div class="frm">
+            <div class="f wide"><label>Name</label><input type="text" v-model="drafts.match[side].name" placeholder="—"></div>
+            <div class="f"><label>Title</label><input type="text" v-model="drafts.match[side].title" placeholder="CM, WFM…"></div>
+            <div class="f"><label>Rating</label><input type="text" v-model="drafts.match[side].rating" placeholder="1685"></div>
+            <div class="f"><label>Wins</label><input type="number" min="0" v-model="drafts.match[side].wins"></div>
+            <div class="f"><label>Draws</label><input type="number" min="0" v-model="drafts.match[side].draws"></div>
+            <div class="f"><label>Losses</label><input type="number" min="0" v-model="drafts.match[side].losses"></div>
+          </div>
+        </div>
+      </div>
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.match">Unsaved changes</span>
+        <span class="diskchg" v-if="diskChanged.match">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.match" @click="revert('match')">Revert</button>
+        <button class="primary" :disabled="!dirty.match || saving" @click="saveMatch">Save players</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Demo mode</h2>
+      <p class="sub">Shows the built-in demo game (fake names, fixed position) instead of the live board — useful for designing scenes and sponsor layouts with no board present. It can never switch itself on; the banner above stays up while it is.</p>
+      <label class="chk">
+        <input type="checkbox" :checked="cfg && cfg.board.demo_mode" @change="setDemo($event.target.checked)">
+        Demo mode <small>&nbsp;— fake player names on the display while on</small>
+      </label>
+    </div>
+  </section>
+
+  <!-- =========================== MATCHES =========================== -->
+  <section v-if="cfg" v-show="tab === 'matches'">
+    <div class="card">
       <h2>Matches — the meet’s run sheet</h2>
-      <p class="sub">Stage the meet’s games here, players picked from the <b>roster</b> (Players tab). Tick <b>show</b> to advertise a match in any zone slot set to “Matches — run sheet” (Sponsors &amp; Zones) — on the start / versus / postgame bands and beside or under the game. <b>DGT</b> marks a game that will run on the board: its <b>▶ Go live</b> loads both players into the live area and starts the game-start sequence in one click, and the result buttons above then complete it on this sheet automatically. Non-DGT games are tracked by hand — status, result when done, and an optional “material” note while live (e.g. <i>White +2</i>).</p>
+      <p class="sub">Stage the meet’s games here, players picked from the <b>roster</b> (Players tab). Tick <b>show</b> to advertise a match in any zone slot set to “Matches — run sheet” (Sponsors &amp; Zones) — on the start / versus / postgame bands and beside or under the game. <b>DGT</b> marks a game that will run on the board: its <b>▶ Go live</b> loads both players into the live area and starts the game-start sequence in one click, and the result buttons on the Live tab then complete it on this sheet automatically. Non-DGT games are tracked by hand — status, result when done, and an optional “material” note while live (e.g. <i>White +2</i>).</p>
       <div class="rows">
         <div class="mtrow" v-for="(m, i) in drafts.matches.list" :key="m.id || i">
           <label class="chk" title="This game runs on the DGT board"><input type="checkbox" v-model="m.on_dgt"> DGT</label>
@@ -355,40 +398,6 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         <button class="ghost" :disabled="!dirty.matches" @click="revert('matches')">Revert</button>
         <button class="primary" :disabled="!dirty.matches || saving" @click="saveMatches">Save matches</button>
       </div>
-    </div>
-
-    <div class="card">
-      <h2>Match — manual players</h2>
-      <p class="sub">Drives the player cards on the game, versus and postgame scenes. The record is wins / draws / losses — shown as <b>W–D–L</b> (“4–1–2”) or <b>W–L</b> when there are no draws (“1–4”); 0/0/0 shows nothing. The result buttons above bump these.</p>
-      <div class="match">
-        <div v-for="side in ['white','black']" :key="side">
-          <div class="colhead">{{ side === 'white' ? 'White' : 'Black' }} <span style="font-weight:400;color:var(--cream-dim);font-size:14px">— {{ recordPreview(drafts.match[side]) }}</span></div>
-          <div class="frm">
-            <div class="f wide"><label>Name</label><input type="text" v-model="drafts.match[side].name" placeholder="—"></div>
-            <div class="f"><label>Title</label><input type="text" v-model="drafts.match[side].title" placeholder="CM, WFM…"></div>
-            <div class="f"><label>Rating</label><input type="text" v-model="drafts.match[side].rating" placeholder="1685"></div>
-            <div class="f"><label>Wins</label><input type="number" min="0" v-model="drafts.match[side].wins"></div>
-            <div class="f"><label>Draws</label><input type="number" min="0" v-model="drafts.match[side].draws"></div>
-            <div class="f"><label>Losses</label><input type="number" min="0" v-model="drafts.match[side].losses"></div>
-          </div>
-        </div>
-      </div>
-      <div class="savebar">
-        <span class="dirty" v-if="dirty.match">Unsaved changes</span>
-        <span class="diskchg" v-if="diskChanged.match">Changed on disk — Save overwrites, Revert loads it</span>
-        <span class="grow"></span>
-        <button class="ghost" :disabled="!dirty.match" @click="revert('match')">Revert</button>
-        <button class="primary" :disabled="!dirty.match || saving" @click="saveMatch">Save players</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Demo mode</h2>
-      <p class="sub">Shows the built-in demo game (fake names, fixed position) instead of the live board — useful for designing scenes and sponsor layouts with no board present. It can never switch itself on; the banner above stays up while it is.</p>
-      <label class="chk">
-        <input type="checkbox" :checked="cfg && cfg.board.demo_mode" @change="setDemo($event.target.checked)">
-        Demo mode <small>&nbsp;— fake player names on the display while on</small>
-      </label>
     </div>
   </section>
 
@@ -1196,6 +1205,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   ];
   const TABS = [
     { id: "live", label: "Live" },
+    { id: "matches", label: "Matches" },
     { id: "event", label: "Event" },
     { id: "board", label: "Board" },
     { id: "transitions", label: "Transitions" },
@@ -1501,6 +1511,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     tab: "live",
     saving: false,
     videos: [],
+    codeSeen: null,                      // server code stamp; change → reload/banner
+    updateReady: false,                  // update arrived while drafts were dirty
     assets: { sponsors: [], players: [], music: null, sfx: null },  // null = not listed yet (no false "missing")
     pmPreview: null,                     // { status, data?, at? } — Pairingsman tab preview
   });
@@ -1540,6 +1552,18 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       state.apiOk = true;
       for (const t of ALL_TABS) rebuildDraft(t, false);
       if (!drafts.result) drafts.result = "";
+      // Code-version watch: a changed stamp = the server restarted on
+      // updated files and this page is running the OLD build. Reload
+      // immediately when nothing is unsaved; otherwise show the banner and
+      // let the operator choose the moment.
+      if (cj.code != null) {
+        if (state.codeSeen === null) state.codeSeen = cj.code;
+        else if (cj.code !== state.codeSeen && !state.updateReady) {
+          const anyDirty = ALL_TABS.some(t => drafts[t] && !jeq(drafts[t], JSON.parse(baselines[t] || "null")));
+          if (anyDirty) state.updateReady = true;
+          else location.reload();
+        }
+      }
     } catch (e) {
       state.apiOk = false;
       state.st = null;
@@ -2571,7 +2595,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
           .map(p => p && p.name).filter(Boolean));
 
       const tabDirty = (id) => {
-        if (id === "live") return dirty.value.match || dirty.value.matches;
+        if (id === "live") return dirty.value.match;
+        if (id === "matches") return dirty.value.matches;
         if (id === "event") return dirty.value.event;
         if (id === "board") return dirty.value.board;
         if (id === "transitions") return dirty.value.trans;
@@ -2695,6 +2720,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         SCENES, TTYPES, DIRS, TIERS, COLS, MOVE_KINDS, MOVE_LABELS, tabs: TABS,
         cfg, st, beatOk, pendingAuto, autoEnabled, seqCfg, seqInfo, effectiveHostLabel, pgnStatusLabel,
         apiOk: computed(() => state.apiOk),
+        updateReady: computed(() => state.updateReady),
+        reloadPage: () => location.reload(),
         now: computed(() => state.now),
         tab: computed(() => state.tab),
         saving: computed(() => state.saving),

@@ -1125,6 +1125,12 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
     if (rt !== restartSeen) { restartSeen = rt; SCC.moves.restartFromBoard(); }
   });
 
+  // Updated code on a restarted server → reload, so this page never keeps
+  // running stale JavaScript after a git pull + restart. The move list
+  // survives via the reload snapshot (moves.js); scenes resume from
+  // absolute timestamps; the music bed resumes from localStorage.
+  SCC.config.onCodeChange(() => location.reload());
+
   SCC.config.start();
 
   /* scale the fixed 1920x1080 canvas to fit the window; OBS at 1920x1080 renders it 1:1 */

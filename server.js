@@ -304,6 +304,23 @@ function fnv1a(str) {
   return h.toString(16).padStart(8, "0");
 }
 
+/* ---- code version stamp -------------------------------------------------
+   Computed ONCE at boot from the mtimes/sizes of the served code. Pages
+   compare it on their existing config poll: a changed stamp means this
+   server was restarted on updated files, and every open display/admin
+   reloads itself — an update (git pull + restart) can never again leave a
+   stale page silently running old JavaScript. */
+const CODE_VERSION = (() => {
+  const parts = [];
+  const add = (file) => {
+    try { const st = fs.statSync(file); parts.push(path.basename(file) + ":" + st.mtimeMs + ":" + st.size); } catch { }
+  };
+  add(__filename);
+  try { for (const e of fs.readdirSync(PUBLIC_DIR)) if (e.endsWith(".html")) add(path.join(PUBLIC_DIR, e)); } catch { }
+  try { for (const e of fs.readdirSync(path.join(PUBLIC_DIR, "js"))) if (e.endsWith(".js")) add(path.join(PUBLIC_DIR, "js", e)); } catch { }
+  return fnv1a(parts.sort().join(";"));
+})();
+
 function configHash() {
   const parts = [];
   for (const name of CONFIG_NAMES) {
@@ -610,7 +627,7 @@ async function handlePgn(res) {
 function handleApi(req, res, pathname) {
   // GET /api/config/hash — the display's cheap poll target.
   if (req.method === "GET" && pathname === "/api/config/hash") {
-    return sendJSON(res, 200, { ok: true, hash: configHash() });
+    return sendJSON(res, 200, { ok: true, hash: configHash(), code: CODE_VERSION });
   }
 
   // GET /api/pgn — probe/relay the LiveChess game PGN (see PGN source above).
@@ -642,7 +659,7 @@ function handleApi(req, res, pathname) {
 
   // GET /api/config — everything merged, plus the hash it corresponds to.
   if (req.method === "GET" && pathname === "/api/config") {
-    return sendJSON(res, 200, { ok: true, hash: configHash(), config: readAllConfig() });
+    return sendJSON(res, 200, { ok: true, hash: configHash(), code: CODE_VERSION, config: readAllConfig() });
   }
 
   // POST /api/config/:name — replace one config file.
