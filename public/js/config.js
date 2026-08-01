@@ -30,6 +30,7 @@ SCC.config = (function () {
     zones: { slots: {}, funder: { enabled: false, text: "", logo: "" } },
     players: { global_photo_mode: "photos_and_avatars",
                manual: { white: {}, black: {} }, roster: [] },
+    matches: { matches: [] },
     pairingsman: { base_url: "", token: "", entity_type: "meeting", entity_id: null,
                    refresh_ms: 30000, fields: {} },
     music: { enabled: false, volume: 50, shuffle: true, shuffle_seed: 1,

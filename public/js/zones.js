@@ -35,8 +35,8 @@ SCC.zones = (function () {
   const TIERS = ["premier", "major", "regular", "minor"];
   const KIND_LABEL = {
     tournament_leaderboard: "Tournament standings",
-    meeting_leaderboard: "Tonight’s standings",
-    concurrent_pairings: "Also playing tonight",
+    meeting_leaderboard: "This meet’s standings",
+    concurrent_pairings: "Also playing this meet",
     results: "Results",
   };
 
@@ -60,10 +60,41 @@ SCC.zones = (function () {
     return !!g.bottom_strip;
   }
 
+  // "4–1–2" (W–D–L) or "1–4" — same format the player cards use; blank at 0.
+  function rosterRecord(name) {
+    const p = (cfg.data.players.roster || []).find(r => r && r.name === name);
+    if (!p) return "";
+    const w = Number(p.wins) || 0, d = Number(p.draws) || 0, l = Number(p.losses) || 0;
+    if (w + d + l === 0) return "";
+    return d ? w + "–" + d + "–" + l : w + "–" + l;
+  }
+
   /* Resolve one slot id to a renderable descriptor, or null (nothing). */
   function resolve(id) {
     const s = (cfg.data.zones.slots || {})[id];
     if (!s || !s.active) return null;
+
+    // The matches run sheet (config/matches.json): upcoming / live / finished
+    // matches of the meet, feature (DGT) games distinguished. Only matches
+    // the operator marked `show` render; none shown = the slot renders
+    // nothing at all — never a placeholder on air.
+    if (s.source === "matches") {
+      const staged = ((cfg.data.matches || {}).matches || []);
+      const rows = staged
+        .filter(m => m && m.show !== false && (m.white || m.black))
+        .slice(0, 6)
+        .map(m => ({
+          feature: !!m.on_dgt,
+          label: m.label || "",
+          white: { name: m.white || "—", record: rosterRecord(m.white) },
+          black: { name: m.black || "—", record: rosterRecord(m.black) },
+          status: ["upcoming", "live", "done"].includes(m.status) ? m.status : "upcoming",
+          result: m.status === "done" ? ({ "1-0": "1–0", "draw": "½–½", "0-1": "0–1" }[m.result] || "") : "",
+          material: m.status === "live" ? (m.material || "") : "",
+        }));
+      if (!rows.length) return null;
+      return { kind: "matches", id, cap: s.data_title || "This meet’s matches", rows };
+    }
 
     if (s.source === "data") {
       if (s.data_mode === "hidden") return null;

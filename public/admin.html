@@ -192,6 +192,9 @@ input[type=range]{accent-color:var(--gold);width:100%;padding:0;height:28px;curs
 .sprow{display:grid;grid-template-columns:22px 170px 105px 150px 46px 1fr 1fr auto;gap:8px;align-items:center}
 .plrow{display:grid;grid-template-columns:46px 150px 132px 68px 62px 52px 52px 52px auto auto auto;gap:8px;align-items:center}
 .plrow input[type=number]{padding:8px 6px}
+.mtrow{display:grid;grid-template-columns:56px 62px 1fr 1fr 110px 108px 92px 90px 84px auto;gap:8px;align-items:center}
+.mtrow select,.mtrow input[type=text]{padding:7px 8px}
+@media (max-width:980px){.mtrow{grid-template-columns:1fr 1fr;grid-auto-rows:auto}}
 .thumb{width:46px;height:38px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;
   display:grid;place-items:center;overflow:hidden;flex:none}
 .thumb img{max-width:100%;max-height:100%;object-fit:contain}
@@ -312,6 +315,45 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       <div class="unit">
         <input type="text" v-model="drafts.result" placeholder="Custom postgame text (e.g. White wins on forfeit)" @keyup.enter="setResultLabelOnly(drafts.result)">
         <button @click="setResultLabelOnly(drafts.result)">Set label only</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Matches — the meet’s run sheet</h2>
+      <p class="sub">Stage the meet’s games here, players picked from the <b>roster</b> (Players tab). Tick <b>show</b> to advertise a match in any zone slot set to “Matches — run sheet” (Sponsors &amp; Zones) — on the start / versus / postgame bands and beside or under the game. <b>DGT</b> marks a game that will run on the board: its <b>▶ Go live</b> loads both players into the live area and starts the game-start sequence in one click, and the result buttons above then complete it on this sheet automatically. Non-DGT games are tracked by hand — status, result when done, and an optional “material” note while live (e.g. <i>White +2</i>).</p>
+      <div class="rows">
+        <div class="mtrow" v-for="(m, i) in drafts.matches.list" :key="m.id || i">
+          <label class="chk" title="This game runs on the DGT board"><input type="checkbox" v-model="m.on_dgt"> DGT</label>
+          <label class="chk" title="Advertise this match in the zones"><input type="checkbox" v-model="m.show"> show</label>
+          <select v-model="m.white"><option value="">— white —</option><option v-for="n in rosterNames" :key="n" :value="n">{{ n }}</option></select>
+          <select v-model="m.black"><option value="">— black —</option><option v-for="n in rosterNames" :key="n" :value="n">{{ n }}</option></select>
+          <input type="text" v-model="m.label" placeholder="label (optional)">
+          <select v-model="m.status">
+            <option value="upcoming">upcoming</option>
+            <option value="live">in progress</option>
+            <option value="done">complete</option>
+          </select>
+          <select v-model="m.result" :disabled="m.status !== 'done'">
+            <option value="">— result —</option>
+            <option value="1-0">1–0</option>
+            <option value="draw">½–½</option>
+            <option value="0-1">0–1</option>
+          </select>
+          <input type="text" v-model="m.material" placeholder="material" :disabled="m.status !== 'live'" title="Who is ahead on material, shown while in progress">
+          <button class="primary" v-if="m.on_dgt" :disabled="dirty.matches || saving || m.status === 'done' || !m.white || !m.black"
+                  :title="dirty.matches ? 'Save matches first' : 'Load the players and start the game-start sequence'"
+                  @click="goLiveMatch(m)">▶ Go live</button>
+          <span v-else></span>
+          <button class="rowdel" @click="drafts.matches.list.splice(i, 1)">✕</button>
+        </div>
+        <div><button class="ghost" @click="addMatch">+ Add match</button></div>
+      </div>
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.matches">Unsaved changes — Go live is disabled until saved</span>
+        <span class="diskchg" v-if="diskChanged.matches">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.matches" @click="revert('matches')">Revert</button>
+        <button class="primary" :disabled="!dirty.matches || saving" @click="saveMatches">Save matches</button>
       </div>
     </div>
 
@@ -922,7 +964,12 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
                 <option value="advertise">“Advertise here” invite</option>
                 <option v-for="t in TIERS" :key="t" :value="'tier:' + t">Sponsors — {{ t }}</option>
                 <option value="data">Data block</option>
+                <option value="matches">Matches — run sheet</option>
               </select>
+              <template v-if="drafts.zones.slots[id].srcSel === 'matches'">
+                <input type="text" v-model="drafts.zones.slots[id].data_title" placeholder="Card title (This meet’s matches)">
+                <span class="hint" style="font-size:12px">Shows the run sheet from Live → Matches (only matches marked “show”).</span>
+              </template>
               <template v-if="String(drafts.zones.slots[id].srcSel).startsWith('tier:')">
                 <div class="unit"><input type="number" min="2" step="1" v-model="drafts.zones.slots[id].rotate_s"><span>s rotation</span></div>
                 <select v-model="drafts.zones.slots[id].show">
@@ -1346,8 +1393,10 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       slots[id] = {
         active: !!s.active,
         // one select drives the content assignment: a sponsor tier, the
-        // advertise-here invite (sponsors + no tier), or a data block
-        srcSel: s.source === "data" ? "data" : (TIERS.includes(s.tier) ? "tier:" + s.tier : "advertise"),
+        // advertise-here invite (sponsors + no tier), a data block, or the
+        // matches run sheet
+        srcSel: s.source === "data" ? "data" : s.source === "matches" ? "matches"
+          : (TIERS.includes(s.tier) ? "tier:" + s.tier : "advertise"),
         rotate_s: (Number(s.rotate_ms) || 8000) / 1000,
         show: ["image", "message", "both"].includes(s.show) ? s.show : "both",
         data_kind: KINDS.includes(s.data_kind) ? s.data_kind : "results",
@@ -1421,10 +1470,24 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     return { enabled: !!e.enabled, fr: ev(e.featured_result), or: ev(e.other_results), ms };
   }
 
+  function draftMatches(c) {
+    return {
+      list: (((c.matches || {}).matches) || []).map(m => ({
+        id: m.id || "",
+        white: m.white || "", black: m.black || "", label: m.label || "",
+        on_dgt: !!m.on_dgt, show: m.show !== false,
+        status: ["upcoming", "live", "done"].includes(m.status) ? m.status : "upcoming",
+        result: ["1-0", "draw", "0-1"].includes(m.result) ? m.result : "",
+        material: m.material || "",
+      })),
+    };
+  }
+
   const DRAFTERS = {
     event: draftEvent, board: draftBoard, trans: draftTrans, inter: draftInter, match: draftMatch,
     sponsors: draftSponsors, zones: draftZones, funder: draftFunder, roster: draftRoster,
     pm: draftPairingsman, music: draftMusic, effects: draftEffects, ticker: draftTicker,
+    matches: draftMatches,
   };
 
   /* ------------------------------------------------------------ state */
@@ -1443,9 +1506,9 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   });
   const drafts = reactive({ event: null, board: null, trans: null, inter: null, match: null,
     sponsors: null, zones: null, funder: null, roster: null, pm: null, music: null, effects: null,
-    ticker: null, tickerFlash: "", result: "" });
+    ticker: null, matches: null, tickerFlash: "", result: "" });
   const baselines = reactive({ event: "", board: "", trans: "", inter: "", match: "",
-    sponsors: "", zones: "", funder: "", roster: "", pm: "", music: "", effects: "", ticker: "" });
+    sponsors: "", zones: "", funder: "", roster: "", pm: "", music: "", effects: "", ticker: "", matches: "" });
   const errs = reactive({ event: "", board: "", trans: "", inter: "", music: "" });
   const toasts = reactive([]);
   let toastId = 0;
@@ -1750,8 +1813,9 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   }
 
   // A result click ends the game: record it against the two players, set the
-  // postgame label, and start the game-end sequence. A rapid second click is
-  // ignored (fat-finger guard); a real correction is Undo then re-click.
+  // postgame label, complete the run-sheet entry that is live on the DGT
+  // board, and start the game-end sequence. A rapid second click is ignored
+  // (fat-finger guard); a real correction is Undo then re-click.
   async function applyResult(code) {
     if (!RESULT_LABEL[code]) return;
     const lr = state.cfg && state.cfg.players && state.cfg.players.last_result;
@@ -1761,28 +1825,41 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       c.players = c.players || {};
       c.players.manual = c.players.manual || {};
       bumpRecords(c.players, code, +1);
-      c.players.last_result = { code, at: Date.now() };
+      // complete the DGT match currently live on the run sheet, if any
+      const live = (c.matches && Array.isArray(c.matches.matches))
+        ? c.matches.matches.find(x => x && x.on_dgt && x.status === "live") : null;
+      if (live) {
+        live.status = "done"; live.result = code; live.material = "";
+        await postConfig("matches", c.matches);
+      }
+      c.players.last_result = { code, at: Date.now(), match_id: live ? live.id : "" };
       await postConfig("players", c.players);
-      state.cfg = c; rebuildDraft("match", true);
+      state.cfg = c; rebuildDraft("match", true); rebuildDraft("matches", true);
       await mutateScenes((sc) => {
         sc.scenes = sc.scenes || {};
         sc.scenes.postgame = Object.assign({}, sc.scenes.postgame, { result_text: RESULT_LABEL[code] });
         sc.sequence = { name: "game_end", started_at: Date.now() };
         sc.pending_auto = null;
       });
-      toast("Result " + RESULT_LABEL[code] + " — records updated, game-end sequence started");
+      toast("Result " + RESULT_LABEL[code] + " — records updated" + (live ? ", run sheet completed" : "") + ", game-end sequence started");
     } catch (e) { toast("Result failed — " + e.message, "err"); }
   }
 
   async function undoResult() {
     try {
       const c = await freshConfig();
-      const code = c.players && c.players.last_result && c.players.last_result.code;
+      const lr = c.players && c.players.last_result;
+      const code = lr && lr.code;
       if (!code) { toast("Nothing to undo"); return; }
       bumpRecords(c.players, code, -1);
-      c.players.last_result = { code: "", at: 0 };
+      // put the completed run-sheet entry back to live
+      if (lr.match_id && c.matches && Array.isArray(c.matches.matches)) {
+        const m = c.matches.matches.find(x => x && x.id === lr.match_id);
+        if (m) { m.status = "live"; m.result = ""; await postConfig("matches", c.matches); }
+      }
+      c.players.last_result = { code: "", at: 0, match_id: "" };
       await postConfig("players", c.players);
-      state.cfg = c; rebuildDraft("match", true);
+      state.cfg = c; rebuildDraft("match", true); rebuildDraft("matches", true);
       await mutateScenes((sc) => {                // reverse the on-air result too, back to game
         sc.scenes = sc.scenes || {};
         sc.scenes.postgame = Object.assign({}, sc.scenes.postgame, { result_text: "" });
@@ -1790,6 +1867,81 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       });
       toast("Last result undone — records restored, back to the game scene");
     } catch (e) { toast("Undo failed — " + e.message, "err"); }
+  }
+
+  /* ------------------------------------------------- matches run sheet */
+
+  function addMatch() {
+    if (!drafts.matches) return;
+    drafts.matches.list.push({
+      id: "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      white: "", black: "", label: "", on_dgt: false, show: true,
+      status: "upcoming", result: "", material: "",
+    });
+  }
+
+  async function saveMatches() {
+    const d = drafts.matches;
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        c.matches = c.matches || {};
+        c.matches.matches = d.list
+          .filter(m => m.white || m.black || (m.label || "").trim())
+          .map(m => ({
+            id: m.id || ("m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
+            white: m.white || "", black: m.black || "",
+            label: String(m.label || "").trim(),
+            on_dgt: !!m.on_dgt, show: !!m.show,
+            status: ["upcoming", "live", "done"].includes(m.status) ? m.status : "upcoming",
+            result: m.status === "done" && ["1-0", "draw", "0-1"].includes(m.result) ? m.result : "",
+            material: m.status === "live" ? String(m.material || "").trim() : "",
+          }));
+        await postConfig("matches", c.matches);
+        state.cfg = c; rebuildDraft("matches", true);
+        toast("Matches saved");
+      } catch (e) { toast("Matches save failed — " + e.message, "err"); }
+    });
+  }
+
+  // ▶ Go live on a DGT match: load both roster players into the live area
+  // (photo, rating, W/D/L — the assignSide treatment for both sides at
+  // once), mark the match live on the sheet, and start the game-start
+  // sequence. Acts on the SAVED sheet, so the button is disabled while the
+  // draft is dirty.
+  async function goLiveMatch(m) {
+    try {
+      const c = await freshConfig();
+      const roster = (c.players && c.players.roster) || [];
+      const find = (n) => roster.find(p => p && p.name === n);
+      const w = find(m.white), b = find(m.black);
+      if (!w || !b) { toast("Both players must be roster entries — check the Players tab", "err"); return; }
+      const side = (p) => {
+        const rating = String(p.rating == null ? "" : p.rating).trim();
+        return {
+          name: p.name, title: "",
+          rating: rating === "" ? null : (/^\d+$/.test(rating) ? Number(rating) : rating),
+          wins: Math.max(0, Math.round(toNum(p.wins, 0, 0))),
+          draws: Math.max(0, Math.round(toNum(p.draws, 0, 0))),
+          losses: Math.max(0, Math.round(toNum(p.losses, 0, 0))),
+          photo: (p.use_photo && p.photo) ? "/assets/players/" + encodeURIComponent(p.photo) : "",
+        };
+      };
+      c.players.manual = c.players.manual || {};
+      c.players.manual.white = Object.assign({}, c.players.manual.white, side(w));
+      c.players.manual.black = Object.assign({}, c.players.manual.black, side(b));
+      await postConfig("players", c.players);
+      const mm = (c.matches && Array.isArray(c.matches.matches)) ? c.matches.matches.find(x => x && x.id === m.id) : null;
+      if (mm) { mm.status = "live"; await postConfig("matches", c.matches); }
+      state.cfg = c; rebuildDraft("match", true); rebuildDraft("matches", true);
+      await mutateScenes((sc) => {
+        sc.sequence = { name: "game_start", started_at: Date.now() };
+        sc.pending_auto = null;
+        sc.scenes = sc.scenes || {};
+        sc.scenes.postgame = Object.assign({}, sc.scenes.postgame, { result_text: "" });
+      });
+      toast(m.white + " v " + m.black + " — players loaded, game-start sequence running");
+    } catch (e) { toast("Go live failed — " + e.message, "err"); }
   }
 
   // Label only: postgame text without touching records or the sequence
@@ -2091,7 +2243,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
           const s = d.slots[id];
           c.zones.slots[id] = Object.assign({}, c.zones.slots[id], {
             active: !!s.active,
-            source: s.srcSel === "data" ? "data" : "sponsors",
+            source: s.srcSel === "data" ? "data" : s.srcSel === "matches" ? "matches" : "sponsors",
             tier: String(s.srcSel).startsWith("tier:") ? s.srcSel.slice(5) : "",
             rotate_ms: Math.round(toNum(s.rotate_s, 8, 2) * 1000),
             show: ["image", "message", "both"].includes(s.show) ? s.show : "both",
@@ -2413,8 +2565,13 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         }
         return out;
       });
+      // Roster names for the run-sheet player dropdowns (saved roster only).
+      const rosterNames = computed(() =>
+        ((state.cfg && state.cfg.players && state.cfg.players.roster) || [])
+          .map(p => p && p.name).filter(Boolean));
+
       const tabDirty = (id) => {
-        if (id === "live") return dirty.value.match;
+        if (id === "live") return dirty.value.match || dirty.value.matches;
         if (id === "event") return dirty.value.event;
         if (id === "board") return dirty.value.board;
         if (id === "transitions") return dirty.value.trans;
@@ -2547,6 +2704,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         switchTab, revert, fmtCountdown, fmtBytes, chapterPreview, configuredVideoMissing,
         setScene, startSeq, stopSeq, cancelPending, setAuto, setDemo,
         applyResult, undoResult, setResultLabelOnly, lastResultCode, resultSummary, recordPreview,
+        rosterNames, addMatch, saveMatches, goLiveMatch,
         saveEvent, saveBoard, saveTrans, saveInter, saveMatch, loadVideos,
         zoneScene, stripOn, colDimmed, colSlotIds, slotLabel, activeSlotCount,
         setStrip, saveSponsors, saveZones, saveFunder, saveRoster, assignSide,
