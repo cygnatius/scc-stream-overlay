@@ -30,7 +30,7 @@ the match fields, photo and record included. Photos upload here (or drop
 files into `assets/players/` and Rescan). The **photo policy** picks photos +
 initials avatars, photos only, or no photos at all.
 
-**Live tab → Matches (the run sheet)** — stage the meet's games ahead of
+**Matches tab (the run sheet)** — stage the meet's games ahead of
 time, players picked from the roster by dropdown. Per match: **DGT** (it will
 run on the board), **show** (advertise it in the zones), a status (upcoming /
 in progress / complete), the result once complete, an optional label

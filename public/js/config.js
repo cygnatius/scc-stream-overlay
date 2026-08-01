@@ -49,6 +49,24 @@ SCC.config = (function () {
   const changeListeners = [];
   function onChange(fn) { changeListeners.push(fn); }
 
+  // Code-version watch: the server stamps its served code at boot. A changed
+  // stamp = the server restarted on updated files, so the page is running
+  // stale JavaScript — listeners (the display) reload themselves. The first
+  // stamp seen is the baseline; nothing fires on boot.
+  let codeSeen = null;
+  const codeListeners = [];
+  function onCodeChange(fn) { codeListeners.push(fn); }
+  function noteCode(code) {
+    if (code == null) return;
+    if (codeSeen === null) { codeSeen = code; return; }
+    if (code !== codeSeen) {
+      codeSeen = code;
+      for (const fn of codeListeners) {
+        try { fn(); } catch (e) { console.warn("[config] code listener failed:", e); }
+      }
+    }
+  }
+
   function applyConfig(config, hash) {
     const old = store.loaded ? store.data : null;
     store.data = config;
@@ -63,6 +81,7 @@ SCC.config = (function () {
     const r = await fetch("/api/config", { cache: "no-store" });
     if (!r.ok) throw new Error("config fetch " + r.status);
     const j = await r.json();
+    noteCode(j.code);
     applyConfig(j.config, j.hash);
   }
 
@@ -75,6 +94,7 @@ SCC.config = (function () {
         const r = await fetch("/api/config/hash", { cache: "no-store" });
         if (!r.ok) throw new Error("hash fetch " + r.status);
         const j = await r.json();
+        noteCode(j.code);
         if (j.hash !== store.hash) await fetchFull();
       }
       store.ok = true;
@@ -96,5 +116,5 @@ SCC.config = (function () {
     try { await fetchFull(); store.ok = true; } catch (e) { store.ok = false; }
   }
 
-  return { store, start, onChange, refresh };
+  return { store, start, onChange, onCodeChange, refresh };
 })();

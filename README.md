@@ -76,7 +76,7 @@ and an optional standing label are all configurable.
 
 ## The matches run sheet
 
-Stage the meet's games (Admin → Live → **Matches**), players picked from the
+Stage the meet's games (Admin → **Matches**), players picked from the
 roster: which game runs on the **DGT board**, which are side games, each with
 a status — upcoming, in progress (with an optional "White +2" material note),
 or complete with its result. Any zone slot set to **Matches — run sheet**
