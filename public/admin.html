@@ -324,13 +324,66 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       </div>
     </div>
 
+    <!-- ============================================================
+         TWIN of the Matches-tab run-sheet card — the operator wants it
+         in BOTH places (their explicit instruction, 2026-08-01, after
+         it was wrongly moved OFF this tab). Same drafts.matches
+         bindings, so the two stay in step automatically; any MARKUP
+         edit here must be mirrored in the Matches tab section.
+         ============================================================ -->
     <div class="card">
-      <h2>Match — manual players</h2>
-      <p class="sub">Drives the player cards on the game, versus and postgame scenes. The record is wins / draws / losses — shown as <b>W–D–L</b> (“4–1–2”) or <b>W–L</b> when there are no draws (“1–4”); 0/0/0 shows nothing. The result buttons above bump these.</p>
+      <h2>Matches — the meet’s run sheet</h2>
+      <p class="sub">The same run sheet as the <b>Matches</b> tab, kept here on Live so everything for the broadcast is in one place. Stage games with players from the <b>roster</b>, tick <b>show</b> to advertise them in the zones, and press <b>▶ Go live</b> on the DGT game to load its players and start the game-start sequence — the result buttons above then complete it on the sheet.</p>
+      <p class="hint" style="margin-bottom:10px" v-if="!rosterNames.length"><b>The roster is empty on this machine</b> — the white/black dropdowns below have nothing to offer until players are added (and saved) on the <b>Players</b> tab. Player and sponsor data lives in this machine’s <code>config/</code> folder and does not travel with git.</p>
+      <div class="rows">
+        <div class="mtrow" v-for="(m, i) in drafts.matches.list" :key="m.id || i">
+          <label class="chk" title="This game runs on the DGT board"><input type="checkbox" v-model="m.on_dgt"> DGT</label>
+          <label class="chk" title="Advertise this match in the zones"><input type="checkbox" v-model="m.show"> show</label>
+          <select v-model="m.white"><option value="">— white —</option><option v-for="n in rosterNames" :key="n" :value="n">{{ n }}</option></select>
+          <select v-model="m.black"><option value="">— black —</option><option v-for="n in rosterNames" :key="n" :value="n">{{ n }}</option></select>
+          <input type="text" v-model="m.label" placeholder="label (optional)">
+          <select v-model="m.status">
+            <option value="upcoming">upcoming</option>
+            <option value="live">in progress</option>
+            <option value="done">complete</option>
+          </select>
+          <select v-model="m.result" :disabled="m.status !== 'done'">
+            <option value="">— result —</option>
+            <option value="1-0">1–0</option>
+            <option value="draw">½–½</option>
+            <option value="0-1">0–1</option>
+          </select>
+          <input type="text" v-model="m.material" placeholder="material" :disabled="m.status !== 'live'" title="Who is ahead on material, shown while in progress">
+          <button class="primary" v-if="m.on_dgt" :disabled="dirty.matches || saving || m.status === 'done' || !m.white || !m.black"
+                  :title="dirty.matches ? 'Save matches first' : 'Load the players and start the game-start sequence'"
+                  @click="goLiveMatch(m)">▶ Go live</button>
+          <span v-else></span>
+          <button class="rowdel" @click="drafts.matches.list.splice(i, 1)">✕</button>
+        </div>
+        <div><button class="ghost" @click="addMatch">+ Add match</button></div>
+      </div>
+      <div class="savebar">
+        <span class="dirty" v-if="dirty.matches">Unsaved changes — Go live is disabled until saved</span>
+        <span class="diskchg" v-if="diskChanged.matches">Changed on disk — Save overwrites, Revert loads it</span>
+        <span class="grow"></span>
+        <button class="ghost" :disabled="!dirty.matches" @click="revert('matches')">Revert</button>
+        <button class="primary" :disabled="!dirty.matches || saving" @click="saveMatches">Save matches</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Match — the live players</h2>
+      <p class="sub">Drives the player cards on the game, versus and postgame scenes. <b>Pick each side from the roster dropdown</b> — name, rating, record and photo land in one go. The fields below are for one-off visitors or corrections. The record is wins / draws / losses — shown as <b>W–D–L</b> (“4–1–2”) or <b>W–L</b> when there are no draws (“1–4”); 0/0/0 shows nothing. The result buttons above bump these.</p>
       <div class="match">
         <div v-for="side in ['white','black']" :key="side">
           <div class="colhead">{{ side === 'white' ? 'White' : 'Black' }} <span style="font-weight:400;color:var(--cream-dim);font-size:14px">— {{ recordPreview(drafts.match[side]) }}</span></div>
           <div class="frm">
+            <div class="f wide"><label>Pick from roster</label>
+              <select @change="pickRoster(side, $event)" :disabled="!rosterNames.length">
+                <option value="" selected>{{ rosterNames.length ? '— choose a player —' : 'no players in the roster yet — add them on the Players tab' }}</option>
+                <option v-for="n in rosterNames" :key="n" :value="n">{{ n }}</option>
+              </select>
+            </div>
             <div class="f wide"><label>Name</label><input type="text" v-model="drafts.match[side].name" placeholder="—"></div>
             <div class="f"><label>Title</label><input type="text" v-model="drafts.match[side].title" placeholder="CM, WFM…"></div>
             <div class="f"><label>Rating</label><input type="text" v-model="drafts.match[side].rating" placeholder="1685"></div>
@@ -364,6 +417,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     <div class="card">
       <h2>Matches — the meet’s run sheet</h2>
       <p class="sub">Stage the meet’s games here, players picked from the <b>roster</b> (Players tab). Tick <b>show</b> to advertise a match in any zone slot set to “Matches — run sheet” (Sponsors &amp; Zones) — on the start / versus / postgame bands and beside or under the game. <b>DGT</b> marks a game that will run on the board: its <b>▶ Go live</b> loads both players into the live area and starts the game-start sequence in one click, and the result buttons on the Live tab then complete it on this sheet automatically. Non-DGT games are tracked by hand — status, result when done, and an optional “material” note while live (e.g. <i>White +2</i>).</p>
+      <p class="hint" style="margin-bottom:10px" v-if="!rosterNames.length"><b>The roster is empty on this machine</b> — the white/black dropdowns below have nothing to offer until players are added (and saved) on the <b>Players</b> tab. Player and sponsor data lives in this machine’s <code>config/</code> folder and does not travel with git.</p>
       <div class="rows">
         <div class="mtrow" v-for="(m, i) in drafts.matches.list" :key="m.id || i">
           <label class="chk" title="This game runs on the DGT board"><input type="checkbox" v-model="m.on_dgt"> DGT</label>
@@ -922,6 +976,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         <button class="ghost" @click="pickUpload('sponsors')">Upload logo…</button>
         <button class="ghost" @click="loadAssets('sponsors', true)">Rescan folder</button>
       </div>
+      <p class="hint" style="margin-bottom:10px" v-if="!drafts.sponsors.list.length"><b>No sponsors on this machine yet</b> — the sponsor zones show the “advertise here” invite until one is added here and given a tier. Sponsor data lives in this machine’s <code>config/</code> folder and does not travel with git.</p>
       <div class="rows">
         <div class="sprow" v-for="(s, i) in drafts.sponsors.list" :key="i">
           <input type="checkbox" v-model="s.active" title="Active — eligible for zones">
@@ -2376,6 +2431,18 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     }
   }
 
+  // The Live-card roster dropdown: choosing a name assigns that side at once
+  // (assignSide below), then the select snaps back to its placeholder — it is
+  // an action, not a state, so the same player can be re-picked after edits.
+  function pickRoster(side, ev) {
+    const name = ev.target.value;
+    ev.target.value = "";
+    if (!name) return;
+    const p = ((state.cfg && state.cfg.players && state.cfg.players.roster) || []).find(r => r && r.name === name);
+    if (p) assignSide(side, p);
+    else toast("“" + name + "” is not in the saved roster — save the Players tab first", "err");
+  }
+
   // Copy a roster player into the manual match fields (Live tab). This is an
   // explicit overwrite of that side — name, rating, W/D/L record and photo
   // (when photo use is on). The title clears; set it on the Live tab if needed.
@@ -2595,7 +2662,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
           .map(p => p && p.name).filter(Boolean));
 
       const tabDirty = (id) => {
-        if (id === "live") return dirty.value.match;
+        if (id === "live") return dirty.value.match || dirty.value.matches;  // the run-sheet twin lives here too
         if (id === "matches") return dirty.value.matches;
         if (id === "event") return dirty.value.event;
         if (id === "board") return dirty.value.board;
@@ -2734,7 +2801,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         rosterNames, addMatch, saveMatches, goLiveMatch,
         saveEvent, saveBoard, saveTrans, saveInter, saveMatch, loadVideos,
         zoneScene, stripOn, colDimmed, colSlotIds, slotLabel, activeSlotCount,
-        setStrip, saveSponsors, saveZones, saveFunder, saveRoster, assignSide,
+        setStrip, saveSponsors, saveZones, saveFunder, saveRoster, assignSide, pickRoster,
         pickUpload, onUpload, loadAssets,
         setMusicEnabled, setMusicShuffle, reshuffleMusic, skipMusic, setMusicVolume,
         musicVolShown, musicNowLabel, musicPill, rescanMusic, saveMusic,
