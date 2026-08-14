@@ -94,10 +94,24 @@ SCC.livechess = (function () {
 
   // Some LiveChess builds report run as a BOOLEAN, others as 0|1|2 (or
   // "white"/"black") NAMING the running side. Use the side when it's named.
+  //
+  // But a bare 1 is AMBIGUOUS, and reading it wrong is the whole black-clock
+  // freeze: side-naming firmware means "white is running", while plenty of
+  // boards send integer 1 for nothing more than "the clock is running". Taken
+  // as "white" it names white on EVERY poll for the whole game, so the tick is
+  // pinned to white — black's clock stands still through every think and
+  // white's keeps running during them. So 1 only names white once this
+  // connection has PROVED the board names sides by sending a 2 (no boolean is
+  // ever 2). Until then 1 just means "running" and the side comes from the
+  // last-press inference below, which is right either way. Strings name the
+  // side unambiguously and are trusted immediately.
+  let sawRunTwo = false;                 // this board has named BLACK at least once
   function runnerFromRun(r) {
-    if (r === 1 || r === "1" || r === "white" || r === "w") return "w";
-    if (r === 2 || r === "2" || r === "black" || r === "b") return "b";
-    return null;                         // boolean-style or absent: no side info
+    if (r === "white" || r === "w") return "w";
+    if (r === "black" || r === "b") return "b";
+    if (r === 2 || r === "2") { sawRunTwo = true; return "b"; }
+    if (sawRunTwo && (r === 1 || r === "1")) return "w";
+    return null;                         // boolean-style, an unproven 1, or absent
   }
 
   function noteFeedClock(side, s) {      // s: seconds from a real feed change
@@ -139,6 +153,7 @@ SCC.livechess = (function () {
     LC_LAST_W = undefined; LC_LAST_B = undefined;
     clockResyncPending = true;
     sawRunTrue = false;                        // re-learn this board's run semantics on reconnect
+    sawRunTwo = false;
     lastChangedSide = null;
   }
 
@@ -251,7 +266,7 @@ SCC.livechess = (function () {
           w: b.clock.white, b: b.clock.black,
           run: b.clock.run === undefined ? null : b.clock.run,
           run_type: typeof b.clock.run,
-          saw_run: sawRunTrue, last_changed: lastChangedSide,
+          saw_run: sawRunTrue, names_sides: sawRunTwo, last_changed: lastChangedSide,
           side: game.clockRunSide,
         };
       }

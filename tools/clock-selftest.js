@@ -91,6 +91,23 @@ ok("run=1 names white → white ticks", game.clockRunSide === "w");
 feed(3000, 3000, 0);
 ok("run=0 → stopped", game.clockRunSide === null);
 
+// === 3b. integer run=1 meaning plain "running" — the top-clock freeze =======
+// A board that has NEVER sent 2 has not proved it names sides, so a bare 1 is
+// "the clock is running", not "white". Read as "white" it pinned the tick to
+// white all game: black's clock frozen through every think, white's running
+// through them. The last-press inference must take over instead.
+reconnect(); game.started = true; game.toMove = "w"; over = false;
+feed(3000, 3000, 1);                                 // first message: resync-adopt
+feed(2990, 3000, 1);                                 // white pressed → BLACK must run
+ok("bare run=1 (never seen 2) + white pressed → BLACK ticks", game.clockRunSide === "b");
+feed(2990, 2985, 1);                                 // black pressed → white runs
+ok("bare run=1 + black pressed → white ticks", game.clockRunSide === "w");
+// ...and a board that DOES name sides still wins outright once it proves it.
+feed(2980, 2985, 2);
+ok("same connection sends 2 → board proved it names sides, BLACK ticks", game.clockRunSide === "b");
+feed(2980, 2975, 1);
+ok("after a proven 2, run=1 names WHITE again", game.clockRunSide === "w");
+
 // === 4. both values change at once → side info discarded, toMove fallback ==
 reconnect(); game.started = true; game.toMove = "b";
 feed(2500, 2500, true);                              // resync-adopt: no change events
