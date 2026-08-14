@@ -2565,7 +2565,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         const c = state.st && state.st.feed && state.st.feed.clock;
         if (!beatOk.value || !c) return "";
         return "white " + c.w + " · black " + c.b
-          + " · run " + JSON.stringify(c.run) + " (" + c.run_type + (c.saw_run ? ", trusted" : ", inferring") + ")"
+          + " · run " + JSON.stringify(c.run) + " (" + c.run_type + (c.saw_run ? ", trusted" : ", inferring")
+          + (c.names_sides ? ", names the side" : ", side inferred from the last press") + ")"
           + " · last press " + (c.last_changed === "w" ? "white" : c.last_changed === "b" ? "black" : "—")
           + " · ticking " + (c.side === "w" ? "white" : c.side === "b" ? "black" : "nobody");
       });
