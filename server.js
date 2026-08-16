@@ -96,7 +96,13 @@ const CONFIG_DEFAULTS = {
     port: 1982,
     manual_host_override: false,         // two-machine fallback: override host manually
     manual_host: "",
-    poll_ms: 800,                        // eboards poll over the LiveChess websocket
+    poll_ms: 300,                        // eboards poll over the LiveChess websocket. Every ply
+                                         // that lands inside ONE poll window is a ply the move
+                                         // reconstruction has to guess at, and past 2 it cannot
+                                         // guess faithfully — so the window is kept short. It is a
+                                         // loopback websocket to a program on this machine; the
+                                         // cost of asking more often is negligible next to a move
+                                         // list that falls behind.
     demo_mode: false,                    // true = show the built-in demo game (design aid).
                                          // Fake names must never reach air by accident.
     move_times: true,                    // per-move times beside each move in the list

@@ -479,7 +479,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       <div class="frm">
         <div class="f"><label>Board serial</label><input type="text" v-model="drafts.board.serialnr"></div>
         <div class="f"><label>LiveChess port</label><input type="number" min="1" max="65535" v-model="drafts.board.port"></div>
-        <div class="f"><label>Feed poll</label><div class="unit"><input type="number" min="200" step="100" v-model="drafts.board.poll_ms"><span>ms — how often the board is read. Default <b>800</b>. 500 feels snappier; under 400 just costs CPU.</span></div></div>
+        <div class="f"><label>Feed poll</label><div class="unit"><input type="number" min="200" step="100" v-model="drafts.board.poll_ms"><span>ms — how often the board is read. Default <b>300</b>. Keep it low: moves that land inside a single poll have to be reconstructed from the position alone, and past two the notation cannot be recovered faithfully. It is a local connection — polling often is cheap.</span></div></div>
       </div>
       <h3>Manual host override (two-machine setup)</h3>
       <div class="frm">
@@ -1303,7 +1303,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
   function draftBoard(c) {
     const b = c.board, p = b.pgn || {};
     return {
-      serialnr: b.serialnr || "", port: b.port ?? 1982, poll_ms: b.poll_ms ?? 800,
+      serialnr: b.serialnr || "", port: b.port ?? 1982, poll_ms: b.poll_ms ?? 300,
       manual_host_override: !!b.manual_host_override, manual_host: b.manual_host || "",
       move_times: b.move_times !== false,
       pgn_enabled: p.enabled !== false,
@@ -2119,7 +2119,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         Object.assign(c.board, {
           serialnr: String(d.serialnr).trim(),
           port: toNum(d.port, 1982, 1, 65535),
-          poll_ms: toNum(d.poll_ms, 800, 200),
+          poll_ms: toNum(d.poll_ms, 300, 200),
           manual_host_override: !!d.manual_host_override,
           manual_host: String(d.manual_host).trim(),
           move_times: !!d.move_times,

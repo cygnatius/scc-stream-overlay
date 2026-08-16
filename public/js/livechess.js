@@ -306,7 +306,7 @@ SCC.livechess = (function () {
   function apply(cfgBoard) {
     const effHost = effectiveHost(cfgBoard);
     const serial = cfgBoard.serialnr != null && cfgBoard.serialnr !== "" ? String(cfgBoard.serialnr) : "";
-    const pollMs = Math.max(200, Number(cfgBoard.poll_ms) || 800);
+    const pollMs = Math.max(200, Number(cfgBoard.poll_ms) || 300);
     const demo = !!cfgBoard.demo_mode;
 
     const first = cur.effHost === undefined;

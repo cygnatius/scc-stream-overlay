@@ -51,6 +51,7 @@ SCC.pgn = (function () {
   });
 
   let clks = [];                // matched game: %clk seconds per ply (null = none)
+  let sansOf = [];              // matched game: its SAN list — the authoritative moves
   let hadAgreement = false;
 
   /* ------------------------------------------------------------- parsing */
@@ -89,15 +90,21 @@ SCC.pgn = (function () {
       const tok = movetext.slice(i, j); i = j;
       if (depth > 0) continue;
       if (/^\d+\.{1,3}$/.test(tok) || /^\$\d+$/.test(tok) || isResult(tok)) continue;
+      // NB: take the SAN off the move object chess.js already returns. Calling
+      // history() per ply rebuilt the whole game from the start each time, making
+      // the parse quadratic in game length — a cost that grew all session, on the
+      // one thread standing between the board and the screen.
       if (/^\d+\./.test(tok)) {                                  // "1.e4" glued form
         const rest = tok.replace(/^\d+\.{1,3}/, "");
         if (!rest) continue;
-        if (!chess.move(rest, { sloppy: true })) return null;
-        sans.push(chess.history().slice(-1)[0]); clkArr.length = sans.length;
+        const mv = chess.move(rest, { sloppy: true });
+        if (!mv) return null;
+        sans.push(mv.san); clkArr.length = sans.length;
         continue;
       }
-      if (!chess.move(tok, { sloppy: true })) return null;       // illegal → untrustworthy game
-      sans.push(chess.history().slice(-1)[0]);                   // normalised SAN (matches observed style)
+      const mv = chess.move(tok, { sloppy: true });
+      if (!mv) return null;                                      // illegal → untrustworthy game
+      sans.push(mv.san);                                         // normalised SAN (matches observed style)
       clkArr.length = sans.length;
     }
     if (!sans.length) return null;
@@ -174,6 +181,7 @@ SCC.pgn = (function () {
       return;
     }
     hadAgreement = true;
+    sansOf = first.sans.slice();
     setState("agree", first.clks.slice(), first.sans.length);
   }
 
@@ -226,11 +234,25 @@ SCC.pgn = (function () {
     return Math.max(0, clks[ply - 2] - clks[ply]);
   }
 
+  /* The matched game's move list, or null when nothing is agreeing.
+
+     This module's contract says the observed model drives the displayed move list
+     and that the PGN never rewrites observed history. Both still hold: the caller
+     (moves.js reconcileTo) only ever APPENDS plies the observed model has not
+     recorded yet, and only when the observed list is still a valid prefix of this
+     one — which is exactly what `agree` means. Before this, the real move list sat
+     here fully parsed and validated while a resync a few lines away threw the same
+     moves in the bin, because the PGN was wired to contribute clock times only. */
+  function matchedSans() {
+    if (state.status !== "agree" && state.status !== "stale") return null;
+    return sansOf.length ? sansOf.slice() : null;
+  }
+
   function init(g, configStore) {
     game = g;
     cfg = configStore;
     if (timer === null) tick();
   }
 
-  return { init, state, timeFor };
+  return { init, state, timeFor, matchedSans };
 })();
