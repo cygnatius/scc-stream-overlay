@@ -204,10 +204,15 @@ scenario("feed dropout → board picked up immediately", () => {
   env.SCC.moves.noteFeedGap();                            // socket came back
   env.SCC.moves.applyPlacement(all[9]);                   // 5 plies further on
   const immediate = env.game.fen.split(" ")[0] === all[9];
-  const kept = env.game.moves.length === before;
+  // never-wipe: the pre-dropout moves must survive UNCHANGED as a prefix. The
+  // list may now be LONGER than that — a short gap gets recovered rather than
+  // discarded — so this asserts the prefix, not the length.
+  const truth = ["e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "b5", "Bb3"];
+  const kept = env.game.moves.length >= before
+    && env.game.moves.slice(0, before).join(" ") === truth.slice(0, before).join(" ");
   const d = env.SCC.moves.diag;
   console.log(`  ${immediate ? "PASS" : "FAIL"}  adopted the board on the first message (no wait) — gapAdopts=${d.gapAdopts}`);
-  console.log(`  ${kept ? "PASS" : "FAIL"}  ${before} pre-dropout moves kept`);
+  console.log(`  ${kept ? "PASS" : "FAIL"}  ${before} pre-dropout moves kept as a prefix (list now ${env.game.moves.length})`);
 
   // and tracking continues from there
   const c = new (load().Chess)(all[9] + " b " + "kq" + " - 0 1");
@@ -232,7 +237,85 @@ scenario("dropout with a piece in hand still holds", () => {
   return held && d.state === "hand" && d.gapAdopts === 0;
 });
 
-/* 11. A DISPLAY RELOAD (OBS source refresh). The move list cannot be rebuilt
+/* 11. THE VENUE BUG #3: the move list falling progressively behind the board.
+       22 plies played, 17 on the stream, and the deficit grew all game. Every
+       scenario above asserts only that the BOARD mirrors — which it always did,
+       even while the notation was being shredded — so this reached air through a
+       green suite. The lag is what is asserted here. */
+scenario("move list keeps up with the board (venue lag)", () => {
+  const sans = ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "c3", "Nf6", "d4", "exd4",
+    "cxd4", "Bb4+", "Bd2", "Bxd2+", "Nbxd2", "d5", "exd5", "Nxd5", "O-O", "O-O"];
+  const all = P(sans);
+  let worst = 0, ok = true;
+  // a poll misses one ply here and there — the everyday case that was accumulating
+  for (const skip of [[], [5], [5, 11], [5, 11, 15]]) {
+    const env = load();
+    for (let i = 0; i < all.length; i++) {
+      if (skip.includes(i)) continue;                    // this placement never observed
+      push(env, all[i], 1);
+    }
+    push(env, all[all.length - 1], 6);                   // settle
+    const lag = sans.length - env.game.moves.length;
+    worst = Math.max(worst, lag);
+    const board = env.game.fen.split(" ")[0] === all[all.length - 1];
+    const exact = env.game.moves.join(" ") === sans.join(" ");
+    if (lag !== 0 || !board || !exact) ok = false;
+    console.log(`  ${lag === 0 && board && exact ? "PASS" : "FAIL"}  ${skip.length} missed poll(s): lag=${lag} board=${board ? "ok" : "WRONG"} notation=${exact ? "exact" : "WRONG"}`);
+  }
+  console.log(`  ${worst === 0 ? "PASS" : "FAIL"}  worst lag across all runs: ${worst} (must be 0)`);
+  return ok && worst === 0;
+});
+
+/* 12. RECONSTRUCTION FIDELITY. A placement says where the pieces are, never how
+       they got there, so a deep search invents move orders that were never
+       played. The depth cap exists to stop that — this pins it down, because
+       raising the depth "to keep up" is exactly the tempting wrong fix. */
+scenario("reconstruction never fabricates moves", () => {
+  const games = [
+    ["e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "Nf6", "O-O", "Be7", "Re1", "b5", "Bb3", "d6"],
+    ["d4", "Nf6", "c4", "e6", "Nc3", "Bb4", "e3", "O-O", "Bd3", "d5", "Nf3", "c5", "O-O", "Nc6"],
+    ["e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "a6", "Be3", "e5", "Nb3", "Be6"],
+  ];
+  let bad = 0;
+  for (const sans of games) {
+    const all = P(sans);
+    const env = load();
+    for (let i = 0; i < all.length; i += 2) push(env, all[i], 1);   // 2 plies per poll
+    push(env, all[all.length - 1], 6);
+    const got = env.game.moves.join(" ");
+    // every ply the list DOES contain must be a move that was really played,
+    // in the order it was really played — a prefix of the truth, never a fiction
+    const isPrefix = sans.slice(0, env.game.moves.length).join(" ") === got;
+    if (!isPrefix) bad++;
+    console.log(`  ${isPrefix ? "PASS" : "FAIL"}  ${sans.length} plies at 2/poll → ${env.game.moves.length} recorded, ${isPrefix ? "all genuine" : "FABRICATED: " + got}`);
+  }
+  return bad === 0;
+});
+
+/* 13. A THROW INSIDE THE SEARCH MUST NOT POISON THE ENGINE. The turn-retry used
+       to install a scratch chess.js instance and restore it only on the success
+       path, so an exception left the corrupt instance in place and every poll
+       after it threw — the move list froze for the rest of the broadcast. */
+scenario("a search that throws costs one poll, not the game", () => {
+  const env = load();
+  const all = P(["e4", "e5", "Nf3", "Nc6"]);
+  for (const p of all) push(env, p, 1);
+  const before = env.game.moves.length;
+
+  // a placement no legal line explains, fed while the turn is a guess
+  env.SCC.moves.applyPlacement("rnbqkbnr/pppp1ppp/8/4p3/3PP3/2N2N2/PPP2PPP/R1BQKB1R");
+  push(env, all[all.length - 1], 8);                     // back to a position it knows
+
+  // and ordinary play must still be tracked afterwards
+  const c = new (load().Chess)();
+  ["e4", "e5", "Nf3", "Nc6", "Bb5"].forEach(s => c.move(s));
+  push(env, c.fen().split(" ")[0], 2);
+  const alive = env.game.moves.length >= before && env.game.moves.slice(-1)[0] === "Bb5";
+  console.log(`  ${alive ? "PASS" : "FAIL"}  engine survived and tracked the next move [${env.game.moves.join(" ")}]`);
+  return alive;
+});
+
+/* 14. A DISPLAY RELOAD (OBS source refresh). The move list cannot be rebuilt
        from one placement, so it is restored from the snapshot when the board is
        standing in exactly the position we last showed. */
 const asyncResults = (async () => {

@@ -143,20 +143,42 @@ server.on("upgrade", (req, socket) => {
   sockets.add(socket);
   socket.on("close", () => sockets.delete(socket));
   socket.on("error", () => sockets.delete(socket));
-  socket.on("data", (buf) => {
-    // decode one masked client frame (fin text frames only; enough for eboards calls)
-    try {
-      if (buf.length < 6) return;
-      const len7 = buf[1] & 0x7f;
+  /* Drain EVERY masked client frame in the buffer, and carry a partial frame over
+     to the next chunk. This used to decode only the first frame of each `data`
+     event and silently drop the rest, which is fine at a lazy poll rate and wrong
+     as soon as polls come close enough together for TCP to coalesce them: most
+     calls went unanswered, the overlay's silence watchdog concluded the feed had
+     died, recycled the socket and declared a gap. That is a fault in this test
+     tool that looks exactly like a fault in the overlay — which is worth
+     remembering the next time the rig reports something alarming. */
+  let acc = Buffer.alloc(0);
+  socket.on("data", (chunk) => {
+    acc = acc.length ? Buffer.concat([acc, chunk]) : chunk;
+    for (;;) {
+      if (acc.length < 2) break;
+      const len7 = acc[1] & 0x7f;
       let off = 2, len = len7;
-      if (len7 === 126) { len = buf.readUInt16BE(2); off = 4; }
-      else if (len7 === 127) { len = Number(buf.readBigUInt64BE(2)); off = 10; }
-      const mask = buf.slice(off, off + 4); off += 4;
-      const data = Buffer.alloc(len);
-      for (let i = 0; i < len; i++) data[i] = buf[off + i] ^ mask[i % 4];
-      const msg = JSON.parse(data.toString("utf8"));
-      if (msg.call === "eboards" && !muted) send(socket, boardMsg());
-    } catch (e) { /* ignore malformed */ }
+      if (len7 === 126) { if (acc.length < 4) break; len = acc.readUInt16BE(2); off = 4; }
+      else if (len7 === 127) { if (acc.length < 10) break; len = Number(acc.readBigUInt64BE(2)); off = 10; }
+      const masked = (acc[1] & 0x80) !== 0;
+      const need = off + (masked ? 4 : 0) + len;
+      if (acc.length < need) break;                    // partial frame: wait for more
+      const opcode = acc[0] & 0x0f;
+      let body = acc.slice(off + (masked ? 4 : 0), need);
+      if (masked) {
+        const mask = acc.slice(off, off + 4);
+        const out = Buffer.alloc(len);
+        for (let i = 0; i < len; i++) out[i] = body[i] ^ mask[i % 4];
+        body = out;
+      }
+      acc = acc.slice(need);
+      if (opcode === 0x8) { try { socket.end(); } catch (e) { } return; }   // close
+      if (opcode !== 0x1) continue;                    // only text frames carry calls
+      try {
+        const msg = JSON.parse(body.toString("utf8"));
+        if (msg.call === "eboards" && !muted) send(socket, boardMsg());
+      } catch (e) { /* ignore malformed */ }
+    }
   });
 });
 
