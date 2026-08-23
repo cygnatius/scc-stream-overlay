@@ -33,6 +33,25 @@ let played = 0;                              // plies on the "physical board"
 let mode = "off";                            // /pgn behaviour
 let override = null;                         // /_place — report this placement verbatim
 let muted = false;                           // /_mute — socket stays open, sends nothing
+// /_latency — model a SLOW, single-threaded LiveChess: requests are served
+// one at a time, each taking latencyMs. A client that polls faster than
+// that builds a backlog here (queue), which is what a real Java LiveChess
+// does when flooded — replies arrive ever later, then the feed looks dead.
+let latencyMs = 0;
+let queue = [];                              // pending eboards replies
+let busy = false;
+let served = 0, maxQueue = 0;
+function serveNext() {
+  if (busy || !queue.length) return;
+  busy = true;
+  const { socket } = queue.shift();
+  setTimeout(() => { if (!muted) send(socket, boardMsg()); served++; busy = false; serveNext(); }, latencyMs);
+}
+function enqueue(socket) {
+  queue.push({ socket });
+  if (queue.length > maxQueue) maxQueue = queue.length;
+  serveNext();
+}
 let clockOv = null;                          // /_clock — force clock values and/or run flag
 
 // seconds or "H:MM:SS" → seconds
@@ -131,8 +150,9 @@ const server = http.createServer((req, res) => {
   // Go quiet WITHOUT closing the socket — the half-open feed that makes
   // "connected" a lie. The overlay should notice the silence and recycle.
   if (p === "/_mute") { muted = new URLSearchParams(q).get("m") !== "0"; return ok("muted=" + muted); }
+  if (p === "/_latency") { latencyMs = Number(new URLSearchParams(q).get("ms")) || 0; queue = []; busy = false; served = 0; maxQueue = 0; return ok("latency=" + latencyMs); }
   if (p === "/_mode") { mode = new URLSearchParams(q).get("m") || "off"; return ok("mode=" + mode); }
-  if (p === "/_state") return ok(JSON.stringify({ played, mode, board: replay(played) }));
+  if (p === "/_state") return ok(JSON.stringify({ played, mode, board: replay(played), latencyMs, queued: queue.length, maxQueue, served }));
   ok("fake livechess", 200);
 });
 
@@ -176,7 +196,7 @@ server.on("upgrade", (req, socket) => {
       if (opcode !== 0x1) continue;                    // only text frames carry calls
       try {
         const msg = JSON.parse(body.toString("utf8"));
-        if (msg.call === "eboards" && !muted) send(socket, boardMsg());
+        if (msg.call === "eboards") { if (latencyMs > 0) enqueue(socket); else if (!muted) send(socket, boardMsg()); }
       } catch (e) { /* ignore malformed */ }
     }
   });

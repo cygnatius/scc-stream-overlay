@@ -36,6 +36,45 @@ SCC.livechess = (function () {
   let game = null;
 
   let ws = null, pollTimer = null, reconnectTimer = null, monitorTimer = null;
+
+  /* ---- request pacing ---------------------------------------------------
+     THE VENUE CONNECTION LOOP (Aug 2026). The poll used to fire an eboards
+     request every poll_ms regardless of whether LiveChess had answered the
+     previous one. LiveChess serves requests one at a time; a board/PC that
+     takes longer than poll_ms per request builds an unbounded backlog (bench:
+     68 queued after 20 s at 300 ms polling vs a 1 s LiveChess), every reply
+     is staler than the last, and once a reply is more than 5 s behind the
+     silence watchdog tears the socket down — whose first request then waits
+     behind the old backlog and trips the watchdog again. A permanent
+     connect → silent → reconnect loop that looked like "the board won't
+     connect", while LiveChess itself was fine.
+     Now: ONE request in flight at a time. The next is sent poll_ms after the
+     reply (or after REPLY_TIMEOUT_MS if LiveChess never answers, so a dead
+     feed still reaches the watchdog). A fast LiveChess sees exactly the old
+     cadence; a slow one is polled at its own pace, no backlog, fresh data. */
+  const REPLY_TIMEOUT_MS = 2500;
+  let awaitingReply = false;
+  let sentAt = 0;
+
+  function sendPoll() {
+    if (!ws || ws.readyState !== 1) return;            // not OPEN
+    if (awaitingReply && Date.now() - sentAt < REPLY_TIMEOUT_MS) {
+      schedulePoll(50);                                // still waiting — look again shortly
+      return;
+    }
+    awaitingReply = true;
+    sentAt = Date.now();
+    try { ws.send(JSON.stringify({ id: 1, call: "eboards" })); } catch (e) { }
+    schedulePoll(cur.pollMs);
+  }
+  function schedulePoll(ms) {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(sendPoll, ms);
+  }
+  function stopPoll() {
+    clearTimeout(pollTimer); pollTimer = null;
+    awaitingReply = false;
+  }
   let retryMs = 1000;
   const RETRY_CAP = 5000;
 
@@ -140,7 +179,7 @@ SCC.livechess = (function () {
   }
 
   function teardown() {
-    clearInterval(pollTimer); pollTimer = null;
+    stopPoll();
     clearTimeout(reconnectTimer); reconnectTimer = null;
     if (ws) {
       try { ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null; ws.close(); } catch (e) { }
@@ -199,11 +238,12 @@ SCC.livechess = (function () {
       if (hadConnection) { diag.reconnects++; SCC.moves.noteFeedGap(); }
       hadConnection = true;
       lastMsgAt = Date.now();                 // start the silence clock from the open
-      clearInterval(pollTimer);
-      pollTimer = setInterval(() => { try { ws.send(JSON.stringify({ id: 1, call: "eboards" })); } catch (e) { } }, cur.pollMs);
+      stopPoll();
+      schedulePoll(0);                        // first request now; paced from here on
     };
     ws.onmessage = (ev) => {
       let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      awaitingReply = false;                   // LiveChess answered — the next poll may go
       let boards = Array.isArray(msg.param) ? msg.param
         : (msg.param && msg.param.board ? [msg.param] : null);
       if (!boards) return;
@@ -272,7 +312,7 @@ SCC.livechess = (function () {
       }
     };
     ws.onclose = () => {
-      clearInterval(pollTimer); pollTimer = null;
+      stopPoll();
       game.lcConnected = false;
       game.clockRunSide = null;
       ws = null;
@@ -332,9 +372,8 @@ SCC.livechess = (function () {
       connect();
       return;
     }
-    if (pollChanged && ws && pollTimer) {     // poll cadence change alone: no reconnect
-      clearInterval(pollTimer);
-      pollTimer = setInterval(() => { try { ws.send(JSON.stringify({ id: 1, call: "eboards" })); } catch (e) { } }, cur.pollMs);
+    if (pollChanged && ws) {                  // poll cadence change alone: no reconnect
+      schedulePoll(cur.pollMs);               // the paced loop picks up cur.pollMs
     }
   }
 
