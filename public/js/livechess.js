@@ -123,29 +123,51 @@ SCC.livechess = (function () {
      the feed shows that clock positive again (a new game or a clock reset).  */
   let sawRunTrue = false;
   const flagged = { w: false, b: false };
-  // The side whose clock value changed at the LAST move-end sync. The player
-  // who just pressed is NOT the one running — so the runner is the OTHER
-  // side. This beats game.toMove, which is a guess after any mid-game
-  // adoption (dropout, reload) and froze the thinking player's clock — the
-  // venue saw black's clock stand still through whole thinks. Cleared when
-  // it means nothing: fresh connection, new game, both values moving at once.
-  let lastChangedSide = null;
 
-  // Some LiveChess builds report run as a BOOLEAN, others as 0|1|2 (or
-  // "white"/"black") NAMING the running side. Use the side when it's named.
-  //
-  // But a bare 1 is AMBIGUOUS, and reading it wrong is the whole black-clock
-  // freeze: side-naming firmware means "white is running", while plenty of
-  // boards send integer 1 for nothing more than "the clock is running". Taken
-  // as "white" it names white on EVERY poll for the whole game, so the tick is
-  // pinned to white — black's clock stands still through every think and
-  // white's keeps running during them. So 1 only names white once this
-  // connection has PROVED the board names sides by sending a 2 (no boolean is
-  // ever 2). Until then 1 just means "running" and the side comes from the
-  // last-press inference below, which is right either way. Strings name the
-  // side unambiguously and are trusted immediately.
-  let sawRunTwo = false;                 // this board has named BLACK at least once
+  /* ---- which clock is ticking -------------------------------------------
+     THE RULE, after three goes at this: the POSITION decides WHICH clock is
+     running. `run` decides only WHETHER one is, and names the side purely as
+     a last resort, when the position cannot.
+
+     `run` was trusted to name the side twice and froze black's clock twice,
+     because the value that matters is ambiguous by design: side-naming
+     firmware sends 1 for "white is running", plenty of boards send 1 for
+     nothing more than "the clock is running", and read the wrong way it names
+     white on EVERY poll for a whole game — black's clock stands still through
+     every think while white's runs through them. Treating a single 2 as proof
+     that the board names sides (the previous fix) still lets any board that
+     emits a 2 for some other reason poison every later 1. No reading of `run`
+     alone is safe on unknown hardware, so it no longer gets to decide.
+
+     The feed's own clock CHANGES are unambiguous once you know which of the
+     two shapes the feed has:
+       • move-end feed (the DGT norm) — a value changes only when someone
+         presses, so the side that changed has just pressed and the OTHER side
+         is the one now running.
+       • live-ticking feed — the running clock counts down between moves, so
+         the side that changed IS the one running.
+     The feed tells us which it is: a RUN of changes to the same side, each
+     one downward, with no move committed in between and only seconds apart,
+     can only be a countdown — presses alternate, so a move-end feed always
+     alternates the side that changes. Learned per connection, and deliberately
+     slow to learn: getting this backwards freezes a clock for a whole game, so
+     it takes three drops in a row (about two seconds of polling on a live
+     feed) before the model flips. An arbiter nudging one clock cannot reach
+     that, and nor can anything that happens once. */
+  let lastChangedSide = null;            // side whose value changed last (null = tells us nothing)
+  let lastChange = null;                 // { side, plies, sec, at } — the live-tick test
+  let liveTick = false;                  // this feed counts the running clock down between moves
+  let sameSideDrops = 0;                 // consecutive drops on one clock with no move between
+  const LIVE_TICK_WINDOW_MS = 5000;
+  const LIVE_TICK_DROPS = 2;             // further drops needed after the first
+
+  // Naming is read only for the one case the presses are silent on: joining
+  // mid-game before any press has been seen. It is dropped for the rest of
+  // the connection the moment it contradicts the board's own presses.
+  let sawRunTwo = false;                 // this board has sent a 2
+  let namingDisproved = false;           // a named side contradicted a press
   function runnerFromRun(r) {
+    if (namingDisproved) return null;
     if (r === "white" || r === "w") return "w";
     if (r === "black" || r === "b") return "b";
     if (r === 2 || r === "2") { sawRunTwo = true; return "b"; }
@@ -193,7 +215,10 @@ SCC.livechess = (function () {
     clockResyncPending = true;
     sawRunTrue = false;                        // re-learn this board's run semantics on reconnect
     sawRunTwo = false;
+    namingDisproved = false;
     lastChangedSide = null;
+    lastChange = null;
+    liveTick = false;
   }
 
   /* Silence watchdog. `ws` staying open is not proof the feed is alive, so a
@@ -260,7 +285,7 @@ SCC.livechess = (function () {
         game.rawPlacement = String(b.board).split(" ")[0];
         // pieces back on the start squares = a new game: last move-end info
         // belongs to the previous one
-        if (game.rawPlacement === SCC.moves.START_PLACEMENT) lastChangedSide = null;
+        if (game.rawPlacement === SCC.moves.START_PLACEMENT) { lastChangedSide = null; lastChange = null; }
         SCC.moves.applyPlacement(b.board, LC_SERIAL);
       }
       if (b.clock) {
@@ -275,6 +300,7 @@ SCC.livechess = (function () {
           if (w0 != null) { game.white.sec = w0; LC_LAST_W = b.clock.white; flagged.w = w0 <= 0; }
           if (b0 != null) { game.black.sec = b0; LC_LAST_B = b.clock.black; flagged.b = b0 <= 0; }
           lastChangedSide = null;        // values re-read across a gap say nothing about who runs
+          lastChange = null;
         }
         // the feed only changes these at move-end; sync ONLY on a real change so the
         // local per-second countdown isn't reset back every poll. A real change is
@@ -282,31 +308,54 @@ SCC.livechess = (function () {
         let wChanged = false, bChanged = false;
         if (b.clock.white !== LC_LAST_W) { LC_LAST_W = b.clock.white; const s = SCC.clock.lcClockSec(b.clock.white); if (s != null) { game.white.sec = s; SCC.moves.syncClock("w", s); noteFeedClock("w", s); wChanged = true; } }
         if (b.clock.black !== LC_LAST_B) { LC_LAST_B = b.clock.black; const s = SCC.clock.lcClockSec(b.clock.black); if (s != null) { game.black.sec = s; SCC.moves.syncClock("b", s); noteFeedClock("b", s); bChanged = true; } }
-        if (wChanged && bChanged) lastChangedSide = null;      // both moved: adjust/reset, no side info
-        else if (wChanged) lastChangedSide = "w";
-        else if (bChanged) lastChangedSide = "b";
-        // WHICH clock ticks — from the best signal the feed gives, in order:
-        //  1. run NAMES the side (0|1|2 / "white"/"black" firmware) → that side.
-        //  2. run is boolean-true → the OPPOSITE of the last side whose value
-        //     changed: whoever just pressed isn't running. Immune to a wrong
-        //     game.toMove after an adopted position (the black-freeze bug).
-        //  3. no change seen yet this connection → game.toMove.
-        // A board that never asserts run at all falls back to inference from
-        // game state (started, not over), same side resolution.
+        // Learn the feed's shape from its own changes (see the note above),
+        // then read the running side off them.
+        if (wChanged && bChanged) { lastChangedSide = null; lastChange = null; }   // both moved: an adjust or reset, no side info
+        else if (wChanged || bChanged) {
+          const side = wChanged ? "w" : "b";
+          const sec = side === "w" ? game.white.sec : game.black.sec;
+          const plies = game.moves.length;
+          if (lastChange && lastChange.side === side && lastChange.plies === plies
+              && sec < lastChange.sec && Date.now() - lastChange.at <= LIVE_TICK_WINDOW_MS) {
+            if (++sameSideDrops >= LIVE_TICK_DROPS) liveTick = true;
+          } else {
+            sameSideDrops = 0;           // alternated, jumped up, or a move landed
+          }
+          lastChange = { side, plies, sec, at: Date.now() };
+          lastChangedSide = side;
+        }
+        const st = SCC.moves.gameStatus();
+        // Where the board's own clock changes point.
+        const pressSide = !lastChangedSide ? null
+          : liveTick ? lastChangedSide                         // the side counting down is running
+          : (lastChangedSide === "w" ? "b" : "w");             // the side that pressed is not
         if (b.clock.run) sawRunTrue = true;
-        const believedRunning = sawRunTrue
-          ? !!b.clock.run
-          : (game.started && !SCC.moves.gameStatus().over);
+        const believedRunning = sawRunTrue ? !!b.clock.run : (game.started && !st.over);
         const named = runnerFromRun(b.clock.run);
+        // A named side that disagrees with the board's own presses is a
+        // misread run value: stop naming from it for this connection.
+        if (named && pressSide && named !== pressSide) { namingDisproved = true; sawRunTwo = false; }
+        // In order: the board's presses, then the tracked turn while the move
+        // engine is certain of it, then naming, then the turn as a bare guess.
         game.clockRunSide = !believedRunning ? null
+          : pressSide ? pressSide
+          : st.turn_certain ? game.toMove
           : named ? named
-          : lastChangedSide ? (lastChangedSide === "w" ? "b" : "w")
           : game.toMove;
         diag.clock = {
           w: b.clock.white, b: b.clock.black,
           run: b.clock.run === undefined ? null : b.clock.run,
           run_type: typeof b.clock.run,
-          saw_run: sawRunTrue, names_sides: sawRunTwo, last_changed: lastChangedSide,
+          saw_run: sawRunTrue,
+          names_sides: sawRunTwo && !namingDisproved,
+          naming_disproved: namingDisproved,
+          live_tick: liveTick,
+          last_changed: lastChangedSide,
+          from: !believedRunning ? "stopped"
+            : pressSide ? (liveTick ? "the clock counting down" : "the last press")
+            : st.turn_certain ? "the tracked turn"
+            : named ? "run naming the side"
+            : "the turn, unconfirmed",
           side: game.clockRunSide,
         };
       }

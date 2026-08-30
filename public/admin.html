@@ -398,6 +398,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         <div><button class="ghost" @click="addMatch">+ Add match</button></div>
       </div>
       <div class="savebar">
+        <button class="danger" :disabled="saving" @click="clearAll"
+                :title="clearAllTitle">Clear all — matches + ticker</button>
         <span class="dirty" v-if="dirty.matches">Unsaved changes — Go live is disabled until saved</span>
         <span class="diskchg" v-if="diskChanged.matches">Changed on disk — Save overwrites, Revert loads it</span>
         <span class="grow"></span>
@@ -748,6 +750,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       </div>
 
       <div class="savebar">
+        <button class="danger" :disabled="saving" @click="clearAll"
+                :title="clearAllTitle">Clear all — matches + ticker</button>
         <span class="dirty" v-if="dirty.ticker">Unsaved changes</span>
         <span class="diskchg" v-if="diskChanged.ticker">Changed on disk — saving overwrites, Revert loads it</span>
         <span class="grow"></span>
@@ -1936,6 +1940,47 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     });
   }
 
+  /* ---- Clear all — the between-meets reset ------------------------------
+     One button for "wipe last meet off the air": every match on the run sheet
+     and every ticker message, gone. They live in two config files, so this is
+     two read-modify-writes, each touching only the key its tab owns
+     (matches.matches, ticker.messages) — every other setting in both files,
+     including the ticker's speed, standing label and per-scene switches,
+     survives untouched. The ticker write bumps force_token as well as
+     generation so anything mid-roll leaves the air at once instead of
+     finishing its lap over an empty list.
+
+     Deliberately NOT cleared: the roster and its W–D–L records, the live
+     players, and the result label. Those are the meet's actual results, not
+     its scaffolding, and an operator clearing the run sheet between rounds
+     must not lose them. */
+  async function clearAll() {
+    const nM = (drafts.matches && drafts.matches.list.length) || 0;
+    const nT = (drafts.ticker && drafts.ticker.messages.length) || 0;
+    if (!nM && !nT) { toast("Nothing to clear — the run sheet and the ticker are already empty"); return; }
+    const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
+    if (!confirm("Clear the whole run sheet and every ticker message?\n\n"
+      + plural(nM, "match", "matches") + " and " + plural(nT, "ticker message", "ticker messages")
+      + " will be removed, on air immediately.\n\nPlayers, records and results are not touched. This cannot be undone.")) return;
+    await saveGuard(async () => {
+      try {
+        const c = await freshConfig();
+        c.matches = c.matches || {};
+        c.matches.matches = [];
+        await postConfig("matches", c.matches);
+        const t = c.ticker || {};
+        t.messages = [];
+        t.generation = (Number(t.generation) || 0) + 1;
+        t.force_token = (Number(t.force_token) || 0) + 1;
+        await postConfig("ticker", t);
+        c.ticker = t;
+        state.cfg = c;
+        rebuildDraft("matches", true); rebuildDraft("ticker", true);
+        toast("Cleared — the run sheet and the ticker are empty");
+      } catch (e) { toast("Clear all failed — " + e.message, "err"); }
+    });
+  }
+
   // ▶ Go live on a DGT match: load both roster players into the live area
   // (photo, rating, W/D/L — the assignSide treatment for both sides at
   // once), mark the match live on the sheet, and start the game-start
@@ -2564,11 +2609,25 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       const clockDiag = computed(() => {
         const c = state.st && state.st.feed && state.st.feed.clock;
         if (!beatOk.value || !c) return "";
+        const who = (s) => s === "w" ? "white" : s === "b" ? "black" : "—";
         return "white " + c.w + " · black " + c.b
           + " · run " + JSON.stringify(c.run) + " (" + c.run_type + (c.saw_run ? ", trusted" : ", inferring")
-          + (c.names_sides ? ", names the side" : ", side inferred from the last press") + ")"
-          + " · last press " + (c.last_changed === "w" ? "white" : c.last_changed === "b" ? "black" : "—")
-          + " · ticking " + (c.side === "w" ? "white" : c.side === "b" ? "black" : "nobody");
+          + (c.naming_disproved ? ", does NOT name sides — contradicted a press"
+             : c.names_sides ? ", names the side" : "") + ")"
+          + " · feed " + (c.live_tick ? "counts down between moves" : "changes at each press")
+          + " · last change " + who(c.last_changed)
+          + " · ticking " + (c.side === "w" ? "white" : c.side === "b" ? "black" : "nobody")
+          + " (from " + c.from + ")";
+      });
+
+      // What Clear all would remove right now — the same button sits on the
+      // Matches and Ticker tabs, and it clears both from either one.
+      const clearAllTitle = computed(() => {
+        const nM = (drafts.matches && drafts.matches.list.length) || 0;
+        const nT = (drafts.ticker && drafts.ticker.messages.length) || 0;
+        if (!nM && !nT) return "Nothing to clear — the run sheet and the ticker are already empty";
+        return "Remove all " + nM + " match(es) and all " + nT + " ticker message(s). "
+          + "Players, records and results are left alone.";
       });
 
       /* ---- ticker preview (first active message, real speed) ---- */
@@ -2762,7 +2821,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         switchTab, revert, fmtCountdown, fmtBytes, chapterPreview, configuredVideoMissing,
         setScene, startSeq, stopSeq, cancelPending, setAuto, setDemo,
         applyResult, undoResult, setResultLabelOnly, lastResultCode, resultSummary, recordPreview,
-        rosterNames, addMatch, saveMatches, goLiveMatch,
+        rosterNames, addMatch, saveMatches, goLiveMatch, clearAll, clearAllTitle,
         saveEvent, saveBoard, saveTrans, saveInter, saveMatch, loadVideos,
         zoneScene, stripOn, colDimmed, colSlotIds, slotLabel, activeSlotCount,
         setStrip, saveSponsors, saveZones, saveFunder, saveRoster, assignSide, pickRoster,

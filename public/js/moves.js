@@ -862,7 +862,7 @@ SCC.moves = (function () {
   // Read-only view of the tracked game for the scene auto-detector.
   // Uses the internal chess.js instance; never mutates it.
   function gameStatus() {
-    if (!GAME) return { tracking: false, over: false, checkmate: false, stalemate: false, draw: false, check: false, turn: null };
+    if (!GAME) return { tracking: false, over: false, checkmate: false, stalemate: false, draw: false, check: false, turn: null, turn_certain: false };
     return {
       tracking: true,
       over: GAME.game_over(),
@@ -871,6 +871,10 @@ SCC.moves = (function () {
       draw: GAME.in_draw(),
       check: GAME.in_check(),        // side to move is in check (not mate) — for the check cue
       turn: GAME.turn(),
+      // false while the turn is inherited rather than observed (a position
+      // adopted across a feed gap carries no side to move). The clock's
+      // ticking-side resolution will not lean on the turn unless it is true.
+      turn_certain: !turnUncertain,
     };
   }
 
