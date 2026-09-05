@@ -19,7 +19,15 @@
      4. then game.toMove as a bare guess (an adoption's inherited turn).
    Plus: the run-flag trust/inference gate, the pre-game hold, and
    feed-authoritative flagfall (fires from a feed zero, never the local
-   countdown; once per side; re-arms for a new game). */
+   countdown; once per side; re-arms for a new game).
+
+   Sept 2026 meet additions:
+     9. LiveChess reporting the board INACTIVE (lost) — a stand-in placement
+        and no clock. Must NOT reach the move engine, must freeze the clocks,
+        and must hand the board back (gap + clock re-read) when it returns.
+    10. clock: null on a live board → nothing ticks.
+    11. A socket stuck CONNECTING is abandoned after its deadline.
+    12. Time the PAGE was asleep is never counted as feed silence. */
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -38,12 +46,15 @@ const game = { toMove: "w", started: false, moves: [], white: { sec: null }, bla
   clockRunSide: null, flagfall: null, lcConnected: false, rawPlacement: null, demo: false };
 let over = false;
 let turnCertain = false;                              // move engine sure of the side to move
-const movesStub = { applyPlacement() {}, syncClock() {}, noteFeedGap() {}, reset() {},
+let applied = 0, gaps = 0;                            // calls into the move engine
+const movesStub = { applyPlacement() { applied++; }, syncClock() {}, noteFeedGap() { gaps++; }, reset() {},
   START_PLACEMENT: START,
   gameStatus() { return { tracking: true, over, turn_certain: turnCertain }; } };
 
 let sock = null;
-class FakeWS { constructor() { this.sent = []; sock = this; } send(x) { this.sent.push(x); } close() { if (this.onclose) this.onclose(); } }
+// readyState defaults to OPEN so the existing scenarios (which drive onopen by
+// hand) keep their meaning; the CONNECTING scenario sets it to 0 itself.
+class FakeWS { constructor() { this.sent = []; this.readyState = 1; this.closed = false; sock = this; } send(x) { this.sent.push(x); } close() { this.closed = true; if (this.onclose) this.onclose(); } }
 
 let NOW = 1_000_000_000;                              // controlled wall clock
 const intervals = [];                                 // captured interval callbacks
@@ -221,6 +232,65 @@ ok("stopped → holds through elapsed time", game.black.sec === 198);
 game.clockRunSide = "b"; tick();                      // resume re-anchors
 NOW += 1000; tick();
 ok("resume counts from the held value", game.black.sec === 197);
+
+// === 9. LiveChess has LOST the board: INACTIVE stand-in must not be read ===
+reconnect(); game.started = true; game.toMove = "w"; over = false;
+feed(3000, 3000, true);                              // resync-adopt on the fresh socket
+feed(2990, 3000, true);                              // white pressed → black ticking
+ok("(setup) black ticking, board online", game.clockRunSide === "b" && game.boardOnline === true);
+const appliedBefore = applied, gapsBefore = gaps;
+const wBefore = game.white.sec, bBefore = game.black.sec;
+// what LiveChess 2.2 actually sends once the e-Board is gone (venue capture):
+function feedOffline() {
+  sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
+    serialnr: "3000150100", source: null, state: "INACTIVE", battery: null, comment: null,
+    board: START, flipped: false, clock: null }] }) });
+}
+feedOffline(); feedOffline(); feedOffline();
+ok("INACTIVE stand-in never reaches the move engine", applied === appliedBefore);
+ok("board flagged offline", game.boardOnline === false && LiveChess.diag.board && LiveChess.diag.board.online === false && LiveChess.diag.board.state === "INACTIVE");
+ok("clocks FROZEN while the board is gone (nothing ticks)", game.clockRunSide === null);
+ok("clock values held, not zeroed", game.white.sec === wBefore && game.black.sec === bBefore);
+ok("counted once, not per poll", LiveChess.diag.boardOfflines === 1 && LiveChess.diag.boardOfflineSince != null);
+ok("LiveChess answering INACTIVE is not 'silence' (no recycle)", LiveChess.diag.silentRecycles === 0);
+// the board comes back mid-game, further on, with the real clocks
+feed(2500, 2600, true, "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR");
+ok("back ACTIVE → move engine told a gap happened (board picked up at once)", gaps === gapsBefore + 1 && applied === appliedBefore + 1);
+ok("back ACTIVE → clocks re-read verbatim from the feed", game.white.sec === 2500 && game.black.sec === 2600 && game.boardOnline === true);
+ok("offline-since cleared", LiveChess.diag.boardOfflineSince === null);
+
+// === 10. a live board with no clock data → nothing ticks =================
+feed(2490, 2600, true);                              // white pressed → black ticks
+ok("(setup) black ticking", game.clockRunSide === "b");
+sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
+  serialnr: "3000150100", state: "ACTIVE", board: MID, clock: null }] }) });
+ok("clock: null on a live board → clock stopped, values held", game.clockRunSide === null && game.white.sec === 2490);
+
+// === 11. a socket stuck CONNECTING is abandoned after its deadline ========
+// Drive a fresh connect() (serial change), leave the socket in CONNECTING,
+// and run the silence watchdog past CONNECT_TIMEOUT_MS.
+sock.onclose();                                       // drop the live one
+LiveChess.apply({ host: "127.0.0.1", port: 1982, serialnr: "Y", poll_ms: 800, demo_mode: false });
+const stuck = sock; stuck.readyState = 0;             // never opens
+const monitor = intervals[intervals.length - 1];      // startMonitor() registered last
+ok("(setup) socket CONNECTING, not connected", game.lcConnected === false && stuck.readyState === 0);
+NOW += 1000; monitor();
+ok("under the deadline: left alone", !stuck.closed && LiveChess.diag.connectTimeouts === 0);
+for (let k = 0; k < 7; k++) { NOW += 1000; monitor(); }   // the watchdog runs once a second
+ok("past the deadline: abandoned and a reconnect scheduled", stuck.closed && LiveChess.diag.connectTimeouts === 1);
+LiveChess.apply({ host: "127.0.0.1", port: 1982, serialnr: "3000150100", poll_ms: 800, demo_mode: false });
+sock.onopen();
+
+// === 12. the page's own sleep is never counted as feed silence ===========
+game.started = true; over = false;
+feed(3000, 3000, true);
+const mon2 = intervals[intervals.length - 1];
+NOW += 1000; mon2();
+const recyclesBefore = LiveChess.diag.silentRecycles;
+NOW += 60000; mon2();                                 // a hidden tab woke after a minute
+ok("60 s page sleep → no recycle, counted as a page sleep", LiveChess.diag.silentRecycles === recyclesBefore && LiveChess.diag.pageSleeps >= 1 && game.lcConnected === true);
+NOW += 1000; mon2(); NOW += 1000; mon2(); NOW += 1000; mon2(); NOW += 1000; mon2(); NOW += 1000; mon2(); NOW += 1000; mon2();
+ok("...but genuine silence after it still recycles", LiveChess.diag.silentRecycles === recyclesBefore + 1);
 
 console.log("\n" + (failed ? "FAILURES: " + failed : "all clock scenarios passing") + "  (" + passed + " passed)");
 process.exit(failed ? 1 : 0);

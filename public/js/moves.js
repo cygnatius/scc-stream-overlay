@@ -216,6 +216,7 @@ SCC.moves = (function () {
         localStorage.setItem(SNAP_KEY, JSON.stringify({
           serial: curSerial || "", placement: placementOf(GAME.fen()), turn: GAME.turn(),
           moves: game.moves.slice(), times: obsTimes.slice(), at: Date.now(),
+          clocks: { w: game.white ? game.white.sec : null, b: game.black ? game.black.sec : null },
         }));
       } catch (e) { /* private mode / no storage — the board still works */ }
     }, 800);
@@ -234,6 +235,44 @@ SCC.moves = (function () {
 
   function dropSnapshot() {
     try { localStorage.removeItem(SNAP_KEY); } catch (e) { }
+  }
+
+  /* The board is OFFLINE (LiveChess has lost it) and this display has seen no
+     real placement yet — a reload, or an OBS source refresh, while the board is
+     gone. There is nothing to hold, so hold what this display last showed: the
+     snapshot's position, moves and clock values, when it is recent and belongs
+     to this board. The same "last position stays on screen" policy, carried
+     across a reload; without it the stream got an empty board and blank clocks.
+     The first real placement is then judged exactly as after any gap: equal →
+     in step, different → adopted. Returns true when something was restored. */
+  function restoreLastKnown(serial) {
+    if (GAME) return false;
+    if (serial != null && serial !== "") curSerial = String(serial);
+    let s = null;
+    try { s = JSON.parse(localStorage.getItem(SNAP_KEY) || "null"); } catch (e) { s = null; }
+    if (!s || !Array.isArray(s.moves) || !s.moves.length || !s.placement) return false;
+    if (Date.now() - (Number(s.at) || 0) > SNAP_MAX_AGE_MS) return false;
+    if (curSerial && s.serial && String(s.serial) !== String(curSerial)) return false;
+    const c = buildChess(s.placement, s.turn);
+    if (!c) return false;
+    GAME = c;
+    turnUncertain = false;                                    // the snapshot knows the turn
+    game.lastMove = null;
+    game.moves = s.moves.slice();
+    obsTimes = Array.isArray(s.times) ? s.times.slice() : [];
+    game.currentPly = game.moves.length - 1;
+    GAME_STARTED = game.started = true;
+    if (s.clocks && game.white && game.black) {
+      if (s.clocks.w != null && game.white.sec == null) game.white.sec = s.clocks.w;
+      if (s.clocks.b != null && game.black.sec == null) game.black.sec = s.clocks.b;
+    }
+    held = null; LC_LASTSEEN = null;                          // the first real placement is judged afresh
+    diag.restored++;
+    diag.boardPlacement = s.placement;                        // Resync / New game act on the last known board
+    game.timesVersion++;
+    pushState();
+    mark(Date.now());
+    return true;
   }
 
   /* OBSERVED per-move times (stage 5). obsTimes[ply] = seconds the mover
@@ -880,7 +919,7 @@ SCC.moves = (function () {
 
   return {
     init, applyPlacement, reset, renderList, gameStatus, syncClock, obsTime,
-    configure, forceResync, restartFromBoard, noteFeedGap, diag,
+    configure, forceResync, restartFromBoard, noteFeedGap, restoreLastKnown, diag,
     START_PLACEMENT, placementOf,
   };
 })();

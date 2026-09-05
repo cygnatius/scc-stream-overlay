@@ -238,7 +238,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
 
     <div class="pills">
       <span class="pill" :class="apiOk ? 'good' : 'down'"><span class="led"></span>Config API <b>{{ apiOk ? 'OK' : 'unreachable' }}</b></span>
-      <span class="pill" :class="beatOk ? 'good' : 'down'"><span class="led"></span>Display <b>{{ beatOk ? 'live' : 'not connected' }}</b></span>
+      <span class="pill" :class="displayPill.cls"><span class="led"></span>Display <b>{{ displayPill.label }}</b></span>
       <span class="pill" :class="st && st.lc_connected ? 'good' : 'warn'"><span class="led"></span>LiveChess <b>{{ st ? (st.lc_connected ? 'connected' : 'not connected') : '—' }}</b></span>
       <span class="pill good" v-if="beatOk"><span class="led" style="background:var(--brick)"></span>On air <b style="text-transform:capitalize">{{ st.scene }}</b><span v-if="seqInfo">· {{ seqInfo.name }}</span></span>
       <span class="pill" :class="st && st.confidence === 'good' ? 'good' : 'warn'" v-if="beatOk">
@@ -250,6 +250,13 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
     <div class="demo-banner" v-if="cfg && cfg.board.demo_mode">
       <span>DEMO MODE IS ON — the display is showing the built-in demo game with fake player names, not the live board.</span>
       <button @click="setDemo(false)">Turn off</button>
+    </div>
+
+    <!-- THE PAGE ON AIR IS NOT REPORTING. Only an ordinary browser tab (or nothing)
+         is sending heartbeats, so this panel is describing a preview tab, not the
+         stream — and nothing pressed here reaches OBS until its page is back. -->
+    <div class="demo-banner" v-if="obsWarning">
+      <span>{{ obsWarning }}</span>
     </div>
 
     <!-- the overlay code was updated while edits were unsaved -->
@@ -548,6 +555,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         <div class="row" v-if="boardDiag.d"><span class="k">Recoveries this session</span><span class="v">{{ boardDiag.d.resyncs }} automatic · {{ boardDiag.d.forced }} manual · {{ boardDiag.d.deep_hits }} gaps reconstructed · {{ boardDiag.d.unexplained }} positions held</span></div>
         <div class="row"><span class="k">Feed</span><span class="v" :class="feedDiag.cls">{{ feedDiag.label }}</span></div>
         <div class="row" v-if="clockDiag"><span class="k">Clock feed</span><span class="v mono">{{ clockDiag }}</span></div>
+        <div class="row" v-if="feedDiag.d"><span class="k">Board in LiveChess</span><span class="v mono" :class="{bad: st && st.board_online === false}">{{ boardStateLabel }}</span></div>
+        <div class="row"><span class="k">Displays reporting</span><span class="v" :class="{bad: obsWarning}">{{ displaysLabel }}</span></div>
         <div class="row" v-if="feedDiag.d"><span class="k">Dropouts recovered</span><span class="v">{{ feedDiag.d.reconnects }} reconnect(s) · {{ feedDiag.d.silent_recycles }} silent feed(s) recycled · {{ boardDiag.d ? boardDiag.d.gap_adopts : 0 }} board(s) picked back up<span v-if="boardDiag.d && boardDiag.d.restored"> · {{ boardDiag.d.restored }} move list(s) restored after a reload</span></span></div>
       </div>
       <div class="btns" style="margin-top:12px">
@@ -557,6 +566,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       <p class="hint" style="margin-top:8px">
         <b>Resync</b> keeps the move list and just corrects the position — use it the moment the board on screen stops matching the table.
         <b>New game</b> clears the move list and starts fresh from the current pieces. Both act within one poll interval.
+        Both use the <b>last position LiveChess delivered from the board</b> — if LiveChess has lost the board (INACTIVE above), there is
+        nothing new to adopt: get the board back first (power, Bluetooth / RabbitConnect, then LiveChess).
       </p>
 
       <div class="savebar">
@@ -2097,7 +2108,9 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       c.board[key] = (Number(c.board[key]) || 0) + 1;
       await postConfig("board", c.board);
       state.cfg = c; rebuildDraft("board", true);
-      toast(msg);
+      const off = state.st && state.st.board_online === false;
+      if (off) toast(msg + " — but LiveChess has NO board right now, so there is nothing new to adopt. Reconnect the board first.", "err");
+      else toast(msg);
     } catch (e) { toast("Command failed — " + e.message, "err"); }
   }
   const bumpResync = () => bumpBoardToken("resync_token", "Resyncing to the physical board — move list kept");
@@ -2480,6 +2493,47 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       const cfg = computed(() => state.cfg);
       const st = computed(() => state.st);
       const beatOk = computed(() => !!(state.st && state.stAge != null && state.stAge < 4000));
+
+      /* WHICH page is reporting. The server bases the status on the OBS page
+         whenever one has reported (its heartbeat carries ua_obs) and says so in
+         st.on_air. A preview tab in a normal browser is throttled by the browser
+         when hidden and is NOT the stream — the Sept 2026 meet ran for an hour
+         with a dead OBS page while a hidden tab kept this panel looking fine. */
+      const displayPill = computed(() => {
+        const st = state.st;
+        if (!beatOk.value) return { cls: "down", label: st && st.on_air === "tab" ? "not connected (a stale browser tab only)" : "not connected" };
+        if (st.on_air === "obs") return { cls: "good", label: "live in OBS" };
+        return { cls: "warn", label: "browser tab only — OBS not reporting" };
+      });
+      const obsWarning = computed(() => {
+        if (!state.apiOk) return "";
+        const list = (state.st && state.st.instance_list) || [];
+        const obsFresh = list.some(i => i.obs && i.age_ms < 4000);
+        if (obsFresh) return "";
+        const tabs = list.filter(i => !i.obs);
+        const where = tabs.length
+          ? " Only " + (tabs.length === 1 ? "a browser tab" : tabs.length + " browser tabs") + (tabs.some(t => t.hidden) ? " (hidden, so throttled by the browser)" : "")
+            + " is reporting, and that is what this panel is describing — not the stream."
+          : " No display page is reporting at all.";
+        return "THE OVERLAY IN OBS IS NOT RESPONDING — nothing pressed here reaches the stream." + where
+          + " In OBS: right-click the Overlay source → Refresh (or Properties → “Refresh cache of current page”). If it stays silent, restart OBS. Close spare display tabs.";
+      });
+      const boardStateLabel = computed(() => {
+        const d = state.st && state.st.feed;
+        const b = d && d.board;
+        if (!beatOk.value || !b) return "—";
+        const since = state.st.board_online === false && d.board_offline_since ? " · offline " + Math.round((state.now - d.board_offline_since) / 1000) + "s" : "";
+        return (b.online ? "ACTIVE" : (b.state || "?") + " — LOST") + " · source " + (b.source || "none") + (b.battery ? " · battery " + b.battery : "")
+          + since + " · lost " + (d.board_offlines || 0) + " time(s) this session";
+      });
+      const displaysLabel = computed(() => {
+        const list = (state.st && state.st.instance_list) || [];
+        if (!state.apiOk) return "—";
+        if (!list.length) return "none";
+        const up = (ms) => ms == null ? "" : ", up " + (ms < 3600000 ? Math.round(ms / 60000) + " min" : (ms / 3600000).toFixed(1) + " h");
+        return list.map(i => (i.obs ? "OBS overlay" : "browser tab") + (i.hidden ? " (hidden, throttled)" : "") + up(i.up_ms)
+          + (i.age_ms > 4000 ? " — STALE, last heard " + Math.round(i.age_ms / 1000) + "s ago" : "")).join("  ·  ");
+      });
       const pendingAuto = computed(() => (state.cfg && state.cfg.scenes.pending_auto) || null);
       const autoEnabled = computed(() => !!(state.cfg && state.cfg.scenes.auto && state.cfg.scenes.auto.enabled));
       const seqCfg = computed(() => {
@@ -2808,7 +2862,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
 
       return {
         SCENES, TTYPES, DIRS, TIERS, COLS, MOVE_KINDS, MOVE_LABELS, tabs: TABS,
-        cfg, st, beatOk, pendingAuto, autoEnabled, seqCfg, seqInfo, effectiveHostLabel, pgnStatusLabel,
+        cfg, st, beatOk, displayPill, obsWarning, boardStateLabel, displaysLabel,
+        pendingAuto, autoEnabled, seqCfg, seqInfo, effectiveHostLabel, pgnStatusLabel,
         apiOk: computed(() => state.apiOk),
         updateReady: computed(() => state.updateReady),
         reloadPage: () => location.reload(),

@@ -348,7 +348,44 @@ const asyncResults = (async () => {
   const noStale = other.game.moves.length === 0 && other.game.fen.split(" ")[0] === elsewhere;
   console.log(`  ${noStale ? "PASS" : "FAIL"}  a different position adopts fresh (no stale history)`);
 
-  return [["display reload restores the move list", saved && restored && mirrors && noStale]];
+  /* 15. BOARD OFFLINE AT BOOT. LiveChess has lost the e-Board and the display
+         reloads (or the OBS source is refreshed): no real placement arrives,
+         only INACTIVE stand-ins, which livechess.js never passes on. The last
+         shown position, moves and clock values must come back from the snapshot
+         rather than an empty board, and the board's return is then judged like
+         any gap: same position → in step, further on → adopted, history kept. */
+  console.log("\n— board offline at boot restores the last known position");
+  STORE.clear();
+  const env3 = load();
+  for (const p of all) push(env3, p, 1);
+  env3.SCC.moves.applyPlacement(all[4], "3000150100");
+  await new Promise(r => setTimeout(r, 1000));
+  const cold = load();                                    // ← reload while the board is gone
+  const got = cold.SCC.moves.restoreLastKnown("3000150100");
+  const shown = cold.game.fen.split(" ")[0] === all[4] && cold.game.moves.join(" ") === "e4 e5 Nf3 Nc6";
+  console.log(`  ${got && shown ? "PASS" : "FAIL"}  offline at boot → last known position and moves shown [${cold.game.moves.join(" ")}]`);
+  const clocksBack = cold.game.white.sec === 3600 && cold.game.black.sec === 3600;
+  console.log(`  ${clocksBack ? "PASS" : "FAIL"}  clock values restored, held`);
+  // the board returns in the SAME position → in step, nothing lost
+  cold.SCC.moves.noteFeedGap();
+  cold.SCC.moves.applyPlacement(all[4], "3000150100");
+  const same = cold.game.moves.length === 4 && cold.SCC.moves.diag.state === "synced";
+  console.log(`  ${same ? "PASS" : "FAIL"}  board back in the same position → in step, 4 moves kept`);
+  // ...or further on → adopted at once, history kept as a prefix
+  const cold2 = load();
+  cold2.SCC.moves.restoreLastKnown("3000150100");
+  cold2.SCC.moves.noteFeedGap();
+  const further = P(["e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4"])[7];
+  cold2.SCC.moves.applyPlacement(further, "3000150100");
+  const adopted = cold2.game.fen.split(" ")[0] === further && cold2.game.moves.slice(0, 4).join(" ") === "e4 e5 Nf3 Nc6";
+  console.log(`  ${adopted ? "PASS" : "FAIL"}  board back further on → adopted at once, history kept [${cold2.game.moves.join(" ")}]`);
+  // a snapshot from ANOTHER board is not shown
+  const other2 = load();
+  const foreign = other2.SCC.moves.restoreLastKnown("9999");
+  console.log(`  ${!foreign ? "PASS" : "FAIL"}  another board's snapshot is not restored`);
+
+  return [["display reload restores the move list", saved && restored && mirrors && noStale],
+          ["board offline at boot restores the last known position", got && shown && clocksBack && same && adopted && !foreign]];
 })();
 
 asyncResults.then((extra) => {

@@ -536,7 +536,13 @@ function mergedStatus() {
   for (const [id, e] of DISPLAY_STATUSES) if (now - e.at > STATUS_TTL_MS) DISPLAY_STATUSES.delete(id);
   if (!DISPLAY_STATUSES.size) return { status: null, age_ms: null };
   const all = [...DISPLAY_STATUSES.values()].sort((a, b) => b.at - a.at);
-  const base = all[0];
+  // The instance ON AIR is the one inside OBS (its heartbeat says ua_obs). A
+  // preview tab in a normal browser must never stand in for it: it did, and
+  // admin reported a live display for an hour while the OBS page was dead.
+  // So an OBS instance is the base whenever one has reported at all, and its
+  // age is the age admin judges — a stale OBS page reads as stale.
+  const obs = all.filter(e => e.status && e.status.ua_obs === true);
+  const base = obs.length ? obs[0] : all[0];
   const status = Object.assign({}, base.status);
   const audioOwner = all.find(e => e.status && e.status.music && e.status.music.inert !== true);
   if (audioOwner && audioOwner !== base) {
@@ -544,6 +550,15 @@ function mergedStatus() {
     status.effects = audioOwner.status.effects;
   }
   status.instances = all.length;
+  status.on_air = obs.length ? "obs" : "tab";        // what kind of page the base status came from
+  status.instance_list = all.map(e => ({
+    instance: e.status.instance,
+    obs: e.status.ua_obs === true,
+    hidden: e.status.hidden === true,
+    age_ms: now - e.at,
+    up_ms: e.status.up_ms == null ? null : e.status.up_ms,
+    scene: e.status.scene == null ? null : e.status.scene,
+  }));
   return { status, age_ms: now - base.at };
 }
 
