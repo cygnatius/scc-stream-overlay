@@ -124,8 +124,20 @@ SCC.livechess = (function () {
      live board (LiveChess's broadcast-delay mode), so only these two count. */
   const OFFLINE_STATES = new Set(["INACTIVE", "NOTRESPONDING"]);
   let boardOnline = null;                // null = no board entry seen yet this page
+  /* TWO signals, both required, and deliberately so. Gating on the state word
+     alone bets the whole feed on one build's vocabulary: any LiveChess that
+     reports a connected, playing board as INACTIVE (no session open in its UI,
+     say) would have the overlay show NOTHING for a whole meet — far worse than
+     the fault this guards against. LiveChess with no board attached reports a
+     null source as well (venue capture, 5 Sept 2026: state INACTIVE, source
+     null, battery null, clock null, and the START POSITION in the board field
+     while the table itself held two kings). So a board that HAS a source is
+     believed whatever its state, and only a sourceless entry can be the
+     stand-in. */
   function isOffline(b) {
-    return typeof b.state === "string" && OFFLINE_STATES.has(b.state.trim().toUpperCase());
+    const stateSaysGone = typeof b.state === "string" && OFFLINE_STATES.has(b.state.trim().toUpperCase());
+    const noSource = b.source == null || b.source === "";
+    return stateSaysGone && noSource;
   }
 
   /* ---- a socket that never finishes connecting ---------------------------

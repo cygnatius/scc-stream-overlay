@@ -855,7 +855,7 @@ SCC.moves = (function () {
     GAME = null; GAME_STARTED = false; LC_LASTSEEN = null;
     held = null; gapPending = false; desyncSince = null; clearTimes(); dropSnapshot();
     game.moves = []; game.currentPly = -1; game.lastMove = null;
-    game.fen = SCC.board.NO_DATA_PLACEMENT; game.toMove = "w"; game.started = false;
+    game.fen = SCC.board.EMPTY_PLACEMENT; game.toMove = "w"; game.started = false;
     game.desync = false;
     diag.state = "no board"; diag.heldMs = 0; diag.enginePlacement = ""; diag.boardPlacement = "";
   }

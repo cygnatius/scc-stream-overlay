@@ -13,16 +13,16 @@ SCC.board = (function () {
   /* both sides use the SOLID glyph shapes; colour (.pc.w cream / .pc.b dark) tells them apart */
   const GLYPH = { K: "♚", Q: "♛", R: "♜", B: "♝", N: "♞", P: "♟", k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
   const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
+  /* NO DATA = NO POSITION. Drawn when nothing real has been received:
+     LiveChess closed or unreachable, or LiveChess answering while it has lost
+     the board. It was briefly the start position instead, on the theory that a
+     blank grid looks broken — and that was wrong. At the 5 Sept meet the table
+     had two kings on it while the overlay showed a full set, because LiveChess
+     with no board attached SENDS the start position as a stand-in and the
+     fallback drew the same thing. A board on air that contradicts the table is
+     read as the real game, so it is worse than an empty one. The overlay never
+     draws a position it has not been given. */
   const EMPTY_PLACEMENT = "8/8/8/8/8/8/8/8";
-  /* What the board shows when there is NO data: LiveChess closed or
-     unreachable, or a display that came up with the board offline and no
-     snapshot to restore. It used to be EMPTY_PLACEMENT — a blank grid on air,
-     which is what a viewer reads as "the overlay is broken". The start
-     position is the honest pre-game picture and the one the overlay showed
-     before. It is a RENDERING fallback only: the move model is still empty
-     (no game tracked, no moves, no clocks), so the first real placement is
-     judged exactly as it always was. */
-  const NO_DATA_PLACEMENT = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
 
   function squareName(col, row) { return FILES[col] + (8 - row); }
 
@@ -58,5 +58,5 @@ SCC.board = (function () {
     }
   }
 
-  return { render, EMPTY_PLACEMENT, NO_DATA_PLACEMENT, GLYPH, FILES, squareName };
+  return { render, EMPTY_PLACEMENT, GLYPH, FILES, squareName };
 })();
