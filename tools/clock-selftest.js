@@ -248,15 +248,6 @@ function feedOffline() {
 }
 feedOffline(); feedOffline(); feedOffline();
 ok("INACTIVE stand-in never reaches the move engine", applied === appliedBefore);
-// ...but an INACTIVE board that HAS a source is a real board: believed, and its
-// placement goes through. Gating on the state word alone would have shown
-// nothing for a whole meet on any build that labels a live board this way.
-sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
-  serialnr: "3000150100", source: "COM4", state: "INACTIVE", battery: "80",
-  board: MID, clock: { white: hms(2900), black: hms(2900), run: true } }] }) });
-ok("INACTIVE WITH a source is believed — placement reaches the move engine", applied === appliedBefore + 1 && game.boardOnline === true);
-feedOffline();
-ok("back to a sourceless INACTIVE → offline again", game.boardOnline === false);
 ok("board flagged offline", game.boardOnline === false && LiveChess.diag.board && LiveChess.diag.board.online === false && LiveChess.diag.board.state === "INACTIVE");
 ok("clocks FROZEN while the board is gone (nothing ticks)", game.clockRunSide === null);
 ok("clock values held, not zeroed", game.white.sec === wBefore && game.black.sec === bBefore);
@@ -300,6 +291,25 @@ NOW += 60000; mon2();                                 // a hidden tab woke after
 ok("60 s page sleep → no recycle, counted as a page sleep", LiveChess.diag.silentRecycles === recyclesBefore && LiveChess.diag.pageSleeps >= 1 && game.lcConnected === true);
 NOW += 1000; mon2(); NOW += 1000; mon2(); NOW += 1000; mon2(); NOW += 1000; mon2(); NOW += 1000; mon2(); NOW += 1000; mon2();
 ok("...but genuine silence after it still recycles", LiveChess.diag.silentRecycles === recyclesBefore + 1);
+
+// === 13. an INACTIVE board that HAS a source is a REAL board ==============
+// The offline test must never be one word wide. If a LiveChess build labels a
+// connected, playing board INACTIVE (no session open in its UI), gating on the
+// state alone would discard the whole feed and the overlay would show nothing
+// for an entire meet. The venue stand-in is sourceless; a real board is not.
+reconnect(); game.started = true; over = false; turnCertain = true; game.toMove = "w";
+feed(3000, 3000, true);                              // a normal ACTIVE message first
+const appliedA = applied;
+sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
+  serialnr: "3000150100", source: "COM4", state: "INACTIVE", battery: "80",
+  board: MID, clock: { white: hms(2900), black: hms(2900), run: true } }] }) });
+ok("INACTIVE WITH a source is believed — placement reaches the move engine", applied === appliedA + 1);
+ok("...and the board is not flagged offline", game.boardOnline === true);
+ok("...and its clock values are taken", game.white.sec === 2900 && game.black.sec === 2900);
+sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
+  serialnr: "3000150100", source: null, state: "INACTIVE", battery: null,
+  board: START, flipped: false, clock: null }] }) });
+ok("a SOURCELESS INACTIVE is the stand-in → offline, nothing applied", game.boardOnline === false && applied === appliedA + 1);
 
 console.log("\n" + (failed ? "FAILURES: " + failed : "all clock scenarios passing") + "  (" + passed + " passed)");
 process.exit(failed ? 1 : 0);
