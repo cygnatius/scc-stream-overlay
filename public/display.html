@@ -766,7 +766,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
   const { createApp, reactive, computed, watch } = Vue;
 
   const game = reactive({
-    fen: SCC.board.NO_DATA_PLACEMENT,   // never a blank grid on air — see board.js
+    fen: SCC.board.EMPTY_PLACEMENT,     // no data = no position drawn — see board.js
     rawPlacement: null,           // last placement straight off the feed (detector input)
     lastMove: null,
     toMove: "w",

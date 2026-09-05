@@ -248,6 +248,15 @@ function feedOffline() {
 }
 feedOffline(); feedOffline(); feedOffline();
 ok("INACTIVE stand-in never reaches the move engine", applied === appliedBefore);
+// ...but an INACTIVE board that HAS a source is a real board: believed, and its
+// placement goes through. Gating on the state word alone would have shown
+// nothing for a whole meet on any build that labels a live board this way.
+sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
+  serialnr: "3000150100", source: "COM4", state: "INACTIVE", battery: "80",
+  board: MID, clock: { white: hms(2900), black: hms(2900), run: true } }] }) });
+ok("INACTIVE WITH a source is believed — placement reaches the move engine", applied === appliedBefore + 1 && game.boardOnline === true);
+feedOffline();
+ok("back to a sourceless INACTIVE → offline again", game.boardOnline === false);
 ok("board flagged offline", game.boardOnline === false && LiveChess.diag.board && LiveChess.diag.board.online === false && LiveChess.diag.board.state === "INACTIVE");
 ok("clocks FROZEN while the board is gone (nothing ticks)", game.clockRunSide === null);
 ok("clock values held, not zeroed", game.white.sec === wBefore && game.black.sec === bBefore);
