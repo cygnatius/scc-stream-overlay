@@ -244,6 +244,9 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 /* Deliberately quiet: a dim gold dot, no red, no icons, no text on stream.   */
 .cfgwarn{position:absolute;left:10px;bottom:10px;width:8px;height:8px;
   border-radius:50%;background:var(--gold);opacity:.28;z-index:80}
+/* board offline (LiveChess has lost the e-Board): a second dim dot, brick, beside it */
+.boardwarn{position:absolute;left:24px;bottom:10px;width:8px;height:8px;
+  border-radius:50%;background:var(--brick);opacity:.5;z-index:80}
 
 /* ==========================================================================
    SCENE SHELLS — start / versus / postgame / intermission / ending.
@@ -686,6 +689,8 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 
   <!-- subtle warning: config poll failing (server unreachable). Last good data stays up. -->
   <div class="cfgwarn" v-if="cfgStale"></div>
+  <!-- subtle warning: LiveChess has lost the e-Board. Last position, moves and clocks hold. -->
+  <div class="boardwarn" v-if="boardOffline"></div>
 
 </div>
 </div>
@@ -770,6 +775,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
     started: false,
     demo: false,
     lcConnected: false,
+    boardOnline: true,            // false while LiveChess reports the e-Board INACTIVE / NOTRESPONDING (livechess.js)
     clockRunSide: null,
     flagfall: null,               // { side, seq } — set by livechess ONLY from a feed clock at zero
     white: { sec: null },
@@ -885,6 +891,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
       const blackClock = computed(() => game.black.sec != null ? SCC.clock.fmtSec(game.black.sec) : "—:—:—");
       const moveStatus = computed(() => (game.toMove === "w" ? "White" : "Black") + " to move");
       const cfgStale = computed(() => cfg.loaded && !cfg.ok);
+      const boardOffline = computed(() => game.boardOnline === false);
 
       /* commentary ticker — engine in ticker.js, two mounts (game footer slot
          and the bottom band every other scene uses) */
@@ -985,7 +992,7 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
 
       return {
         game, general, eventTitle, venueLine, boardLabel, roundLabel, socials, funder, white, black,
-        whiteClock, blackClock, moveStatus, cfgStale, pgnDiverged,
+        whiteClock, blackClock, moveStatus, cfgStale, boardOffline, pgnDiverged,
         tk, ticker, tkStyle, tkEnd, tickerHere, tickerBand,
         sceneStyle, curtainStyle, startTimesLine, featureLines, postResult, fxResultKey,
         nextBroadcast, ivHasVideo,
@@ -1130,6 +1137,30 @@ footer{grid-row:3;display:flex;align-items:center;justify-content:space-between;
   // survives via the reload snapshot (moves.js); scenes resume from
   // absolute timestamps; the music bed resumes from localStorage.
   SCC.config.onCodeChange(() => location.reload());
+
+  /* DEAD-PAGE WATCHDOG. The overlay inside OBS once sat for over an hour with
+     every request hanging below the page — no config poll, no heartbeat, no
+     LiveChess socket, not one TCP connection — while its video kept looping,
+     so it looked alive from the outside and admin was fooled by a preview tab.
+     Requests now time out (config.js), which makes that state visible: a run
+     of TIMEOUTS with no reply for two minutes means the page's network path is
+     wedged, and a reload gives the page a fresh one. Fast FAILURES (the server
+     down, connection refused) never reload — the last good data stays on air,
+     exactly as before, and a reload there would put an error page on stream. */
+  (function deadPageWatchdog() {
+    const DEAD_AFTER_MS = 120000;
+    let lastReloadAt = 0;
+    setInterval(() => {
+      const c = SCC.config.store;
+      if (!c.loaded || !c.lastOkAt) return;
+      const dead = Date.now() - c.lastOkAt;
+      if (c.lastFailKind !== "timeout" || dead < DEAD_AFTER_MS) return;
+      if (Date.now() - lastReloadAt < 60000) return;     // one attempt a minute while it stays wedged
+      lastReloadAt = Date.now();
+      console.warn("[watchdog] no config reply for " + Math.round(dead / 1000) + "s (requests hanging) — reloading the page");
+      location.reload();
+    }, 5000);
+  })();
 
   SCC.config.start();
 

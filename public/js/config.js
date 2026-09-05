@@ -44,6 +44,9 @@ SCC.config = (function () {
     hash: "",
     ok: false,          // last poll succeeded
     loaded: false,      // at least one full config has been applied
+    lastOkAt: 0,        // epoch ms of the last successful poll (0 = never)
+    failStreak: 0,      // consecutive failed polls
+    lastFailKind: null, // "timeout" (request hung) | "error" (refused/failed) | null
   });
 
   const changeListeners = [];
@@ -77,8 +80,22 @@ SCC.config = (function () {
     }
   }
 
+  /* Every request has a deadline. A fetch that never settles used to end the
+     poll loop for good: the await never returned, so the next tick was never
+     scheduled, and a page whose network path had wedged (the OBS overlay, for
+     over an hour of a broadcast) sat "polling" without a single request ever
+     leaving it. With a deadline the loop keeps going, the failure is visible
+     (store.ok, lastFailKind), and the display's dead-page watchdog can act. */
+  const HASH_TIMEOUT_MS = 4000;
+  const FULL_TIMEOUT_MS = 10000;
+  function fetchT(url, ms) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), ms);
+    return fetch(url, { cache: "no-store", signal: ctl.signal }).finally(() => clearTimeout(t));
+  }
+
   async function fetchFull() {
-    const r = await fetch("/api/config", { cache: "no-store" });
+    const r = await fetchT("/api/config", FULL_TIMEOUT_MS);
     if (!r.ok) throw new Error("config fetch " + r.status);
     const j = await r.json();
     noteCode(j.code);
@@ -91,15 +108,20 @@ SCC.config = (function () {
       if (!store.loaded) {
         await fetchFull();
       } else {
-        const r = await fetch("/api/config/hash", { cache: "no-store" });
+        const r = await fetchT("/api/config/hash", HASH_TIMEOUT_MS);
         if (!r.ok) throw new Error("hash fetch " + r.status);
         const j = await r.json();
         noteCode(j.code);
         if (j.hash !== store.hash) await fetchFull();
       }
       store.ok = true;
+      store.lastOkAt = Date.now();
+      store.failStreak = 0;
+      store.lastFailKind = null;
     } catch (e) {
       store.ok = false;               // keep last known good data on screen
+      store.failStreak++;
+      store.lastFailKind = (e && e.name === "AbortError") ? "timeout" : "error";
     }
     const interval = Math.max(150, Number(store.data.general.config_poll_ms) || 500);
     timer = setTimeout(tick, interval);

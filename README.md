@@ -56,7 +56,22 @@ operating the admin page: **SCC-Overlay-Manual-Setup.md**.
   clocks are re-read from the feed, and the board is picked back up on the first
   message even when the moves played in between can't be reconstructed. A
   display reload restores the move list from the position on the board.
-  Regression suite: `node tools/engine-selftest.js .`
+  **LiveChess losing the board itself** (Bluetooth / RabbitConnect dropped,
+  board switched off) is different from a dropout: LiveChess keeps answering,
+  but reports the board `INACTIVE` with a stand-in start position and no
+  clock. The overlay treats that as *board offline* — the last real position,
+  move list and clock values hold, the clocks stop counting, a second dim dot
+  appears bottom-left, and Admin → Board says "LiveChess has LOST the e-Board".
+  Resync / New game can't help there (they adopt the last position LiveChess
+  delivered); get the board back and the overlay picks it up at once.
+  **Which page is on air:** admin bases its status on the display running
+  *inside OBS*. A preview tab in an ordinary browser is throttled when hidden
+  and is not the stream — if only such a tab is reporting, admin shows a red
+  banner ("the overlay in OBS is not responding": right-click the source →
+  Refresh). Requests from the display time out rather than hang, and a page
+  whose requests have all hung for two minutes reloads itself.
+  Regression suites: `node tools/engine-selftest.js .`,
+  `node tools/clock-selftest.js .`, `node tools/pgn-selftest.js .`
 
 ## Commentary ticker
 

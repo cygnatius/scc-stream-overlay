@@ -7,6 +7,8 @@
    GET /_back      take the last move back
    GET /_reset     board back to the start position
    GET /_mode?m=agree|clkless|off|diverge|ambiguous
+   GET /_offline?m=1|0   LiveChess has LOST the board: state INACTIVE, no clock,
+                         a stand-in start placement (what 2.2 really sends)
    GET /_state     debug
    Zero deps: node http + crypto + the vendored chess.js. */
 "use strict";
@@ -53,6 +55,7 @@ function enqueue(socket) {
   serveNext();
 }
 let clockOv = null;                          // /_clock — force clock values and/or run flag
+let offline = false;                         // /_offline — the e-Board gone from LiveChess's point of view
 
 // seconds or "H:MM:SS" → seconds
 function parseSec(v) { if (v == null) return null; if (String(v).includes(":")) { return String(v).split(":").map(Number).reduce((a, n) => a * 60 + n, 0); } const n = Number(v); return isNaN(n) ? null : n; }
@@ -70,6 +73,17 @@ function replay(n) {
 const fmt = (s) => Math.floor(s / 3600) + ":" + String(Math.floor((s % 3600) / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
 
 function boardMsg() {
+  // Captured from LiveChess 2.2 at the venue with the Bluetooth board gone:
+  // the entry stays, state INACTIVE, source/battery/clock null, and the
+  // board field is the START position whatever is on the table.
+  if (offline) {
+    return JSON.stringify({
+      response: "call", id: 1,
+      param: [{ serialnr: "3000150100", source: null, state: "INACTIVE", battery: null, comment: null,
+        board: START, flipped: false, clock: null }],
+      time: Date.now(),
+    });
+  }
   const { placement, clocks } = replay(played);
   let w = clocks.w, b = clocks.b, run = played > 0;
   if (clockOv) {
@@ -150,9 +164,10 @@ const server = http.createServer((req, res) => {
   // Go quiet WITHOUT closing the socket — the half-open feed that makes
   // "connected" a lie. The overlay should notice the silence and recycle.
   if (p === "/_mute") { muted = new URLSearchParams(q).get("m") !== "0"; return ok("muted=" + muted); }
+  if (p === "/_offline") { offline = new URLSearchParams(q).get("m") !== "0"; return ok("offline=" + offline); }
   if (p === "/_latency") { latencyMs = Number(new URLSearchParams(q).get("ms")) || 0; queue = []; busy = false; served = 0; maxQueue = 0; return ok("latency=" + latencyMs); }
   if (p === "/_mode") { mode = new URLSearchParams(q).get("m") || "off"; return ok("mode=" + mode); }
-  if (p === "/_state") return ok(JSON.stringify({ played, mode, board: replay(played), latencyMs, queued: queue.length, maxQueue, served }));
+  if (p === "/_state") return ok(JSON.stringify({ played, mode, offline, board: replay(played), latencyMs, queued: queue.length, maxQueue, served }));
   ok("fake livechess", 200);
 });
 

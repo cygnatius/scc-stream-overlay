@@ -245,7 +245,8 @@ SCC.scenes = (function () {
 
   function runDetector(sc, now) {
     const st = SCC.moves.gameStatus();
-    const conf = (!game.lcConnected || game.demo || !st.tracking) ? "unknown" : "good";
+    const offline = game.boardOnline === false;          // LiveChess has lost the e-Board
+    const conf = (!game.lcConnected || offline || game.demo || !st.tracking) ? "unknown" : "good";
     view.confidence = conf;
 
     const startedEdge = startEdge;
@@ -253,7 +254,8 @@ SCC.scenes = (function () {
 
     const over = st.tracking && st.over && game.moves.length > 0;
     const kingsCentre = isKingsCentreSignal(game.rawPlacement);
-    view.detected = over
+    view.detected = offline ? "board offline — LiveChess has lost the e-Board"
+      : over
       ? (st.checkmate ? "game over — checkmate" : st.stalemate ? "game over — stalemate" : "game over — draw")
       : kingsCentre ? "result signal — kings on centre squares"
         : game.started ? "game in progress"
@@ -339,14 +341,31 @@ SCC.scenes = (function () {
   // the server keeps both heartbeats apart instead of one overwriting the
   // other every second — that overwrite was the admin's flapping labels.
   const INSTANCE = "d-" + Math.random().toString(36).slice(2, 10);
+  const LOADED_AT = Date.now();
+  // The page ON AIR is the one inside OBS — its user agent says "OBS/". A
+  // preview tab in a normal browser reports too, and used to be taken for the
+  // display: admin showed a live overlay for an hour while the OBS page was
+  // dead. The server keys off this flag; hidden tells admin a tab is being
+  // throttled by its browser (timers once a minute) and is not to be trusted.
+  const IN_OBS = /\bOBS\//.test(navigator.userAgent || "");
 
   async function postStatus() {
+    // A heartbeat that never settles must not pile up behind a wedged network
+    // path — one a second, for an hour, is a leak. Abort it instead.
+    const ctl = new AbortController();
+    const tmo = setTimeout(() => ctl.abort(), 3000);
     try {
       await fetch("/api/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: ctl.signal,
         body: JSON.stringify({
           instance: INSTANCE,
+          ua_obs: IN_OBS,
+          hidden: !!document.hidden,
+          up_ms: Date.now() - LOADED_AT,
+          net: { last_ok_age_ms: cfg.lastOkAt ? Date.now() - cfg.lastOkAt : null, fail_streak: cfg.failStreak || 0, fail_kind: cfg.lastFailKind || null },
+          board_online: game.boardOnline !== false,
           at: Date.now(),
           scene: view.current,
           sequence: view.seqName,
@@ -381,6 +400,11 @@ SCC.scenes = (function () {
             last_msg_age_ms: SCC.livechess.diag.lastMsgAgeMs,
             silent: SCC.livechess.diag.silent,
             clock: SCC.livechess.diag.clock || null,
+            board: SCC.livechess.diag.board || null,
+            board_offlines: SCC.livechess.diag.boardOfflines,
+            board_offline_since: SCC.livechess.diag.boardOfflineSince,
+            connect_timeouts: SCC.livechess.diag.connectTimeouts,
+            page_sleeps: SCC.livechess.diag.pageSleeps,
           } : null,
           pairingsman: window.SCC.pairingsman
             ? { status: SCC.pairingsman.state.status, entity: SCC.pairingsman.state.entity, fetched_at: SCC.pairingsman.state.fetchedAt }
@@ -390,6 +414,7 @@ SCC.scenes = (function () {
         }),
       });
     } catch (e) { /* server down — heartbeat resumes when it returns */ }
+    finally { clearTimeout(tmo); }
   }
 
   /* ------------------------------------------------------------ init */

@@ -84,6 +84,11 @@ SCC.pgn = (function () {
         i = end === -1 ? movetext.length : end + 1;
         continue;
       }
+      // A stray "}" (an unbalanced comment) is a delimiter the token scanner
+      // below never steps over: inside a variation it produced an empty token
+      // and an unchanged i, and the loop spun for ever on the display's only
+      // thread. Skip it like any other punctuation.
+      if (ch === "}") { i++; continue; }
       // next whitespace/brace-delimited token
       let j = i;
       while (j < movetext.length && !/[\s{}()]/.test(movetext[j])) j++;
@@ -196,7 +201,12 @@ SCC.pgn = (function () {
       if (pc.enabled === false || game.demo) {
         setState(pc.enabled === false ? "off" : "absent", [], 0);
       } else {
-        const r = await fetch("/api/pgn", { cache: "no-store" });
+        // deadline, so a hung request can never end this poll loop (see config.js)
+        const ctl = new AbortController();
+        const tmo = setTimeout(() => ctl.abort(), 5000);
+        let r;
+        try { r = await fetch("/api/pgn", { cache: "no-store", signal: ctl.signal }); }
+        finally { clearTimeout(tmo); }
         const j = await r.json();
         if (!j.ok) {
           // no source (or probing disabled server-side): quiet. Keep last good

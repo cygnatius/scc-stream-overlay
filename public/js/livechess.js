@@ -106,6 +106,48 @@ SCC.livechess = (function () {
   let clockResyncPending = false;        // adopt the feed's clocks on the next message
   let lastMsgAt = 0;                     // last board message (epoch ms)
 
+  /* ---- the e-Board going missing INSIDE LiveChess (Sept 2026 meet) -------
+     LiveChess keeps answering eboards after it has lost the board itself
+     (Bluetooth dropped, board powered off, RabbitConnect gone): the entry
+     comes back state INACTIVE (or NOTRESPONDING), source null, clock null,
+     and a STAND-IN placement — the start position. That is not a reading of
+     the table. The old code fed it to the move engine like any other
+     placement: the game on air jumped back to the start squares, the move
+     list was wiped as "a new game", and because the clock block is skipped
+     when clock is null the side that had been ticking kept ticking on a
+     board nobody could see. Resync / New game then "did nothing" — they adopt
+     the last placement received, which was that stand-in.
+     Now a non-ACTIVE board is OFFLINE: the last real position, moves and
+     clocks are held (clocks frozen), admin is told LiveChess has lost the
+     board, and when it comes back the position is picked up at once and the
+     clocks re-read — the same path as a socket dropout. DELAYED is still a
+     live board (LiveChess's broadcast-delay mode), so only these two count. */
+  const OFFLINE_STATES = new Set(["INACTIVE", "NOTRESPONDING"]);
+  let boardOnline = null;                // null = no board entry seen yet this page
+  function isOffline(b) {
+    return typeof b.state === "string" && OFFLINE_STATES.has(b.state.trim().toUpperCase());
+  }
+
+  /* ---- a socket that never finishes connecting ---------------------------
+     Every reconnect used to rely on the browser eventually firing onclose or
+     onerror. When the request never leaves the page (a wedged network layer
+     under the renderer — the OBS overlay sat like that for over an hour with
+     no TCP connection at all), readyState stays CONNECTING for ever, neither
+     event comes, the silence watchdog sees "not connected" and stands down,
+     and the feed is dead until someone refreshes the source. So a handshake
+     gets a deadline, after which the socket is abandoned and retried. */
+  const CONNECT_TIMEOUT_MS = 6000;
+  let connectTimer = null;
+  let connectStartedAt = 0;
+
+  /* The silence watchdog must not count time the PAGE was not running. A
+     hidden browser tab is throttled to one wake-up a minute, so every wake-up
+     found a minute of "silence" and recycled a perfectly good socket — 176
+     times in an afternoon on the operator's preview tab. Time we were asleep
+     says nothing about LiveChess: it is re-armed, not charged. */
+  const SLEEP_GAP_MS = 4000;             // monitor runs every 1 s; a longer gap = we were suspended
+  let lastMonitorAt = 0;
+
   /* ---- clock running + flagfall -----------------------------------------
      The per-second countdown is gated on the DGT feed's `clock.run`. On some
      boards/firmware that flag is never asserted, and then the display only
@@ -166,6 +208,11 @@ SCC.livechess = (function () {
     silentRecycles: 0,                   // connections dropped for going quiet
     lastMsgAgeMs: null,                  // null = nothing received yet
     silent: false,
+    connectTimeouts: 0,                  // handshakes abandoned for never completing
+    pageSleeps: 0,                       // watchdog gaps that were the page's own doing
+    board: null,                         // { state, source, battery, online } as LiveChess reports the board
+    boardOfflines: 0,                    // times LiveChess reported the board gone
+    boardOfflineSince: null,             // epoch ms while offline, else null
   };
 
   function init(g) { game = g; }
@@ -181,6 +228,8 @@ SCC.livechess = (function () {
   function teardown() {
     stopPoll();
     clearTimeout(reconnectTimer); reconnectTimer = null;
+    clearTimeout(connectTimer); connectTimer = null;
+    connectStartedAt = 0;
     if (ws) {
       try { ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null; ws.close(); } catch (e) { }
       ws = null;
@@ -200,11 +249,29 @@ SCC.livechess = (function () {
      board message must arrive every few polls or the socket gets recycled. */
   function startMonitor() {
     clearInterval(monitorTimer);
+    lastMonitorAt = 0;
     monitorTimer = setInterval(() => {
-      diag.lastMsgAgeMs = lastMsgAt ? Date.now() - lastMsgAt : null;
-      if (cur.demo || !cur.effHost || !ws || !game.lcConnected) { diag.silent = false; return; }
+      const now = Date.now();
+      // Was the page itself asleep since the last run? Then the silence was
+      // ours, not LiveChess's: re-arm the clocks and judge afresh from here.
+      if (lastMonitorAt && now - lastMonitorAt > SLEEP_GAP_MS) {
+        diag.pageSleeps++;
+        if (lastMsgAt) lastMsgAt = now;
+        if (connectStartedAt) connectStartedAt = now;
+      }
+      lastMonitorAt = now;
+      diag.lastMsgAgeMs = lastMsgAt ? now - lastMsgAt : null;
+      if (cur.demo || !cur.effHost) { diag.silent = false; return; }
+      // Stuck in CONNECTING past the deadline (belt and braces for the
+      // connect timer, which cannot fire if timers were the thing throttled).
+      if (ws && ws.readyState === 0 && connectStartedAt && now - connectStartedAt > CONNECT_TIMEOUT_MS) {
+        diag.silent = false;
+        abandonConnect();
+        return;
+      }
+      if (!ws || !game.lcConnected) { diag.silent = false; return; }
       const grace = Math.max(5000, (Number(cur.pollMs) || 800) * 5);
-      if (lastMsgAt && Date.now() - lastMsgAt > grace) {
+      if (lastMsgAt && now - lastMsgAt > grace) {
         diag.silent = true;
         diag.silentRecycles++;
         SCC.moves.noteFeedGap();              // whatever comes back, pick the board up
@@ -224,11 +291,31 @@ SCC.livechess = (function () {
     retryMs = Math.min(RETRY_CAP, retryMs * 2);      // 1s → 2s → 4s → 5s, never spins
   }
 
+  // A handshake that never completes: drop the socket ourselves and retry.
+  // close() on a CONNECTING socket is meant to fire onclose, but a request
+  // wedged below the page never comes back, so nothing here waits for it.
+  function abandonConnect() {
+    diag.connectTimeouts++;
+    const s = ws; ws = null;
+    clearTimeout(connectTimer); connectTimer = null;
+    connectStartedAt = 0;
+    if (s) { try { s.onopen = s.onmessage = s.onclose = s.onerror = null; s.close(); } catch (e) { } }
+    stopPoll();
+    game.lcConnected = false;
+    game.clockRunSide = null;
+    scheduleReconnect();
+  }
+
   function connect() {
     if (cur.demo || !cur.effHost) return;
     const url = "ws://" + cur.effHost + "/api/v1.0";
     try { ws = new WebSocket(url); } catch (e) { scheduleReconnect(); return; }
+    connectStartedAt = Date.now();
+    clearTimeout(connectTimer);
+    connectTimer = setTimeout(() => { if (ws && ws.readyState === 0) abandonConnect(); }, CONNECT_TIMEOUT_MS);
     ws.onopen = () => {
+      clearTimeout(connectTimer); connectTimer = null;
+      connectStartedAt = 0;
       retryMs = 1000;
       game.lcConnected = true;
       clockResyncPending = true;
@@ -251,11 +338,43 @@ SCC.livechess = (function () {
       if (!b) b = boards.find(x => x.state === "ACTIVE") || boards[0];
       if (!b) return;
       LC_SERIAL = b.serialnr || LC_SERIAL;
+      lastMsgAt = Date.now();                  // LiveChess is talking, whatever it says about the board
+      // Is the board actually there? See "the e-Board going missing INSIDE
+      // LiveChess" above: a non-ACTIVE entry carries a stand-in placement and
+      // no clock, and must not be read as the table.
+      const online = !isOffline(b);
+      diag.board = {
+        state: b.state == null ? null : String(b.state),
+        source: b.source == null ? null : String(b.source),
+        battery: b.battery == null ? null : String(b.battery),
+        online,
+      };
+      if (!online) {
+        if (boardOnline !== false) {           // the edge: LiveChess just lost it
+          boardOnline = false;
+          diag.boardOfflines++;
+          diag.boardOfflineSince = Date.now();
+        }
+        game.boardOnline = false;
+        game.clockRunSide = null;              // nothing ticks on a board nobody can see
+        lastChangedSide = null;
+        // A display that booted while the board was already gone has nothing
+        // to hold — show what it last showed (moves.js snapshot), if anything.
+        if (SCC.moves.restoreLastKnown) SCC.moves.restoreLastKnown(LC_SERIAL);
+        return;                                // position, moves and clock values all HELD
+      }
+      if (boardOnline === false) {             // back again: pick the board up at once,
+        SCC.moves.noteFeedGap();               // and re-read the clocks — a dropout, in effect
+        clockResyncPending = true;
+        LC_LAST_W = undefined; LC_LAST_B = undefined;
+        diag.boardOfflineSince = null;
+      }
+      boardOnline = true;
+      game.boardOnline = true;
       // Raw placement straight from the feed, BEFORE the move engine filters it.
       // The scene auto-detector needs this: the DGT "result" signal (both kings
       // placed on the centre squares) is exactly the kind of unreachable
       // placement the move engine deliberately holds and hides.
-      lastMsgAt = Date.now();
       if (b.board) {
         game.rawPlacement = String(b.board).split(" ")[0];
         // pieces back on the start squares = a new game: last move-end info
@@ -309,9 +428,17 @@ SCC.livechess = (function () {
           saw_run: sawRunTrue, names_sides: sawRunTwo, last_changed: lastChangedSide,
           side: game.clockRunSide,
         };
+      } else {
+        // No clock data at all (no DGT clock attached, or it was unplugged
+        // mid-game): the values on screen are whatever we last knew, and
+        // nothing may count down on them.
+        game.clockRunSide = null;
+        lastChangedSide = null;
       }
     };
     ws.onclose = () => {
+      clearTimeout(connectTimer); connectTimer = null;
+      connectStartedAt = 0;
       stopPoll();
       game.lcConnected = false;
       game.clockRunSide = null;
