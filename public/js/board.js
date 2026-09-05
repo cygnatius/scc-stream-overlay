@@ -14,6 +14,15 @@ SCC.board = (function () {
   const GLYPH = { K: "♚", Q: "♛", R: "♜", B: "♝", N: "♞", P: "♟", k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
   const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
   const EMPTY_PLACEMENT = "8/8/8/8/8/8/8/8";
+  /* What the board shows when there is NO data: LiveChess closed or
+     unreachable, or a display that came up with the board offline and no
+     snapshot to restore. It used to be EMPTY_PLACEMENT — a blank grid on air,
+     which is what a viewer reads as "the overlay is broken". The start
+     position is the honest pre-game picture and the one the overlay showed
+     before. It is a RENDERING fallback only: the move model is still empty
+     (no game tracked, no moves, no clocks), so the first real placement is
+     judged exactly as it always was. */
+  const NO_DATA_PLACEMENT = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
 
   function squareName(col, row) { return FILES[col] + (8 - row); }
 
@@ -49,5 +58,5 @@ SCC.board = (function () {
     }
   }
 
-  return { render, EMPTY_PLACEMENT, GLYPH, FILES, squareName };
+  return { render, EMPTY_PLACEMENT, NO_DATA_PLACEMENT, GLYPH, FILES, squareName };
 })();
