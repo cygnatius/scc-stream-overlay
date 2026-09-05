@@ -5,12 +5,18 @@
 
      node tools/clock-selftest.js .
 
-   Covers the tick-side resolution (the venue black-clock freeze):
-     1. run NAMING the side (0|1|2 / "white"/"black" firmware) wins outright —
-        even when game.toMove is a wrong adoption guess.
-     2. boolean run: the runner is the OPPOSITE of the side whose clock value
-        changed at the last move-end — also immune to a wrong toMove.
-     3. game.toMove is only the last resort (no change seen yet).
+   Covers the tick-side resolution (the venue black-clock freeze). The rule
+   under test: the POSITION decides WHICH clock runs; `run` decides only
+   WHETHER one runs, and names a side purely as a last resort.
+     1. the board's own clock CHANGES come first. On a move-end feed the side
+        that changed has just pressed, so the OTHER side runs; on a live-
+        ticking feed the side that changed IS the one running. Which shape the
+        feed has is learned from the feed, slowly and reversibly.
+     2. then game.toMove, but only while the move engine is certain of it.
+     3. then run naming a side — and a name that contradicts a press is thrown
+        away for the rest of the connection, so one stray 2 can never pin the
+        tick to white for a whole game.
+     4. then game.toMove as a bare guess (an adoption's inherited turn).
    Plus: the run-flag trust/inference gate, the pre-game hold, and
    feed-authoritative flagfall (fires from a feed zero, never the local
    countdown; once per side; re-arms for a new game).
@@ -39,10 +45,11 @@ const MID = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPPPPPP/RNBQKBNR";   // after 1.e4 —
 const game = { toMove: "w", started: false, moves: [], white: { sec: null }, black: { sec: null },
   clockRunSide: null, flagfall: null, lcConnected: false, rawPlacement: null, demo: false };
 let over = false;
+let turnCertain = false;                              // move engine sure of the side to move
 let applied = 0, gaps = 0;                            // calls into the move engine
 const movesStub = { applyPlacement() { applied++; }, syncClock() {}, noteFeedGap() { gaps++; }, reset() {},
   START_PLACEMENT: START,
-  gameStatus() { return { tracking: true, over }; } };
+  gameStatus() { return { tracking: true, over, turn_certain: turnCertain }; } };
 
 let sock = null;
 // readyState defaults to OPEN so the existing scenarios (which drive onopen by
@@ -78,7 +85,7 @@ function reconnect() { sock.onclose();
   sock.onopen(); }
 
 // === 1. boolean run, no change info yet → toMove fallback =================
-game.started = true; game.toMove = "w";
+game.started = true; game.toMove = "w"; turnCertain = false;
 feed(3000, 3000, true);
 ok("boolean run, no change info → toMove fallback", game.clockRunSide === "w");
 feed(3000, 3000, false);
@@ -93,8 +100,10 @@ ok("white pressed + wrong toMove=w → BLACK ticks (freeze fix)", game.clockRunS
 feed(2990, 2990, true);                              // now black presses
 ok("black pressed → white ticks", game.clockRunSide === "w");
 
-// === 3. run NAMES the side (0|1|2 firmware) — wins over everything =========
-reconnect(); game.started = true; game.toMove = "w"; over = false;
+// === 3. run NAMES the side (0|1|2 firmware) — the last resort still works ==
+// Nothing else has anything to say here: a fresh connection has seen no press
+// and the turn is an adoption guess, so naming is all that is left.
+reconnect(); game.started = true; game.toMove = "w"; over = false; turnCertain = false;
 feed(3000, 3000, 2);                                 // run=2: black running, toMove wrong
 ok("run=2 names black + wrong toMove=w → BLACK ticks", game.clockRunSide === "b");
 feed(3000, 3000, 1);
@@ -107,7 +116,7 @@ ok("run=0 → stopped", game.clockRunSide === null);
 // "the clock is running", not "white". Read as "white" it pinned the tick to
 // white all game: black's clock frozen through every think, white's running
 // through them. The last-press inference must take over instead.
-reconnect(); game.started = true; game.toMove = "w"; over = false;
+reconnect(); game.started = true; game.toMove = "w"; over = false; turnCertain = true;
 feed(3000, 3000, 1);                                 // first message: resync-adopt
 feed(2990, 3000, 1);                                 // white pressed → BLACK must run
 ok("bare run=1 (never seen 2) + white pressed → BLACK ticks", game.clockRunSide === "b");
@@ -118,6 +127,43 @@ feed(2980, 2985, 2);
 ok("same connection sends 2 → board proved it names sides, BLACK ticks", game.clockRunSide === "b");
 feed(2980, 2975, 1);
 ok("after a proven 2, run=1 names WHITE again", game.clockRunSide === "w");
+
+// === 3c. one stray 2 must not poison every later 1 ========================
+// The previous fix read a single 2 as proof the board names sides, so a board
+// that sends a 2 for any other reason had every later 1 read as "white" —
+// black frozen all over again. The board's own presses now come first, and a
+// name that contradicts one is dropped for the rest of the connection.
+reconnect(); game.started = true; game.toMove = "w"; over = false; turnCertain = true;
+feed(3000, 3000, 1);                                 // resync-adopt
+feed(2990, 3000, 2);                                 // white pressed; run happens to say 2
+ok("run agrees with the press → BLACK ticks", game.clockRunSide === "b");
+feed(2990, 2980, 2);                                 // black pressed; run STILL says 2
+ok("run contradicts the press → the press wins, WHITE ticks", game.clockRunSide === "w");
+feed(2970, 2980, 1);                                 // white pressed; a poisoned 1 would say "white"
+ok("after the contradiction a bare 1 no longer names white → BLACK ticks", game.clockRunSide === "b");
+
+// === 3d. a feed that counts the running clock down between moves ==========
+// Some builds report the live value every poll instead of only at each press.
+// Then the side whose value is CHANGING is the one running, not the opposite.
+// The model flips only after three drops in a row on one clock with no move
+// between them — one-off changes must never flip it.
+reconnect(); game.started = true; over = false; turnCertain = false; game.toMove = "b";
+feed(3000, 3000, 1);                                 // resync-adopt
+feed(2999, 3000, 1);                                 // one drop on white: still read as a press
+ok("a single drop is still read as a press → BLACK ticks", game.clockRunSide === "b");
+feed(2998, 3000, 1);
+feed(2997, 3000, 1);                                 // three drops, no move between → live-ticking feed
+ok("live-ticking feed learned → the clock counting down runs (WHITE)", game.clockRunSide === "w");
+feed(2997, 2999, 1);                                 // black's clock is the one moving now
+ok("live-ticking feed → black counting down, BLACK ticks", game.clockRunSide === "b");
+
+// === 3e. the tracked turn beats naming; a guessed turn does not ===========
+reconnect(); game.started = true; over = false; turnCertain = true; game.toMove = "w";
+feed(2500, 2500, 2);                                 // no press seen yet; run names black
+ok("no press yet, turn certain → the tracked turn wins over run naming", game.clockRunSide === "w");
+turnCertain = false;                                 // the turn is now only an inherited guess
+feed(2500, 2500, 2);
+ok("no press, turn only a guess → run naming takes over (BLACK)", game.clockRunSide === "b");
 
 // === 4. both values change at once → side info discarded, toMove fallback ==
 reconnect(); game.started = true; game.toMove = "b";
