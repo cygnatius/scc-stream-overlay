@@ -54,6 +54,7 @@ globalThis.__legacy = {
   lastChanged:  () => LAST_CHANGED_SIDE,
   liveTick:     () => LIVE_TICK,
   sawRun:       () => SAW_RUN_TRUE,
+  runLive:      () => RUN_IS_LIVE,
   anchor:       () => CLOCK_ANCHOR,
   CONFIG:       () => CONFIG,
   connect:      () => connectLiveChess(),
@@ -136,12 +137,23 @@ sock.onopen();
 
 console.log("\nLEGACY overlay — clock scenarios\n");
 
-/* === 1. first message after a connect tells us nothing about the side ===== */
+/* Settle the board first. The FIRST placement of a connection is adopted, and
+   an adoption starts a clean move list — so anything a scenario wants in
+   STATE.moves has to be put there after that has happened, not before. This
+   message also carries both clock values as "changed" (we had none), which is
+   why it can say nothing about a side. */
+feed(3000, 3000, true);
 L.STATE().moves = ["e4"];                       // game under way
 L.STATE().toMove = "w";
+
+/* === 1. no clock change yet → nothing to read a side from ================= */
+/* An idle repeat: same placement, same values. It is also where a genuine run
+   flag proves itself — still asserted between presses, where a press-instant
+   artifact would already have dropped back to 0. */
 feed(3000, 3000, true);
-ok("first message (both values 'changed') → no side info, falls back to toMove",
+ok("no clock change yet → no side info, falls back to toMove",
    L.runSide() === "w" && L.lastChanged() === null);
+ok("run asserted on an idle poll → proven a live flag", L.sawRun() === true);
 
 /* === 2. THE REGRESSION: a press beats a WRONG toMove ====================== */
 /* White presses — white's value drops, black's holds — while toMove is still
@@ -181,6 +193,39 @@ ok("never-asserts-run + no moves → pre-game hold, nothing ticks", L.runSide() 
 L.STATE().moves = ["e4"];
 feed(3000, 2990, undefined);
 ok("...and once a move has landed it infers from game state", L.runSide() !== null);
+
+/* === 5b. run asserted only AT THE PRESS — the venue freeze ================ */
+/* The board flicks run up on the press message and reports 0 on the polls in
+   between. Obeyed literally that says "both clocks stopped" for the whole of
+   every think — the thinking player's clock stands still all game. No amount of
+   WHICH-side work can reach this: the gate has already decided nothing runs.
+   A run flag never seen up on an idle poll has not earned the right to stop
+   anything. */
+L.newGame();
+feed(4000, 4000, 0);                            // settle the board (this adoption wipes the list)
+L.STATE().moves = ["e4"];                       // ...so put the game under way after it, not before
+L.STATE().toMove = "w";                         // the wrong guess a mid-game adoption leaves
+ok("(setup) press-artifact board proves nothing", L.runLive() === false);
+feed(3990, 4000, 1);                            // WHITE PRESSES: value moves, run flicks up
+ok("press-artifact run: the press → BLACK runs", L.runSide() === "b");
+feed(3990, 4000, 0);                            // black thinks; run back down, values hold
+ok("press-artifact run: black still thinking → BLACK STILL RUNS", L.runSide() === "b");
+feed(3990, 4000, 0);
+ok("...and it does not stop on the next poll either", L.runSide() === "b");
+feed(3990, 3980, 1);                            // black presses back
+ok("press-artifact run: black pressed → white runs", L.runSide() === "w");
+
+/* === 5c. an ABSENT run key is silence, not "stopped" ====================== */
+/* `!!undefined` is false, so a feed that merely omits the key on the odd poll
+   used to freeze the display on exactly those polls. */
+L.newGame();
+feed(5000, 5000, true);                         // settle
+feed(5000, 5000, true);                         // idle repeat → the flag proves itself live
+ok("(setup) run proven live on this board", L.runLive() === true);
+L.STATE().moves = ["e4"];
+L.STATE().toMove = "w";
+feed(5000, 5000, undefined);                    // no `run` key at all
+ok("run key absent → the feed said nothing, the clock keeps running", L.runSide() === "w");
 
 /* === 6. the countdown is WALL-ANCHORED, not decrement-per-fire ============ */
 L.newGame();

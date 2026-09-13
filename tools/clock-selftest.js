@@ -88,8 +88,14 @@ function reconnect() { sock.onclose();
 game.started = true; game.toMove = "w"; turnCertain = false;
 feed(3000, 3000, true);
 ok("boolean run, no change info → toMove fallback", game.clockRunSide === "w");
+// run=false is only obeyed once this board has PROVEN run is a live flag, by
+// asserting it on an idle poll (no clock change, no new placement — i.e.
+// between presses). The message above was this connection's first and carried
+// a new placement, so it proves nothing; this repeat of it is the idle poll.
+feed(3000, 3000, true);
+ok("run asserted on an idle poll → proven a live flag", game.clockRunSide === "w");
 feed(3000, 3000, false);
-ok("boolean run=false → stopped", game.clockRunSide === null);
+ok("boolean run=false, once proven live → stopped", game.clockRunSide === null);
 
 // === 2. boolean run + last-changed beats a WRONG toMove ====================
 // White presses (white's value drops) while toMove is wrongly "w" after an
@@ -192,6 +198,38 @@ over = true;
 feed(2990, 2990, false);
 ok("inference stops when game over", game.clockRunSide === null);
 over = false;
+
+// === 6b. run asserted only AT THE PRESS — the venue freeze =================
+// The board reports run=1 on the press message and 0 on the polls in between.
+// Obeyed literally that means "both clocks stopped" for the whole of every
+// think: the thinking player's clock stands still all game. Three goes at the
+// WHICH-side logic could not touch this, because the gate had already decided
+// nothing was running at all. The zeros of a run flag that has never been seen
+// up on an idle poll carry no authority.
+reconnect();
+game.started = true; over = false; game.toMove = "w"; turnCertain = false;
+feed(3000, 3000, 0);                                 // before any press
+ok("press-artifact run: pre-press poll → the turn", game.clockRunSide === "w");
+feed(2990, 3000, 1);                                 // WHITE PRESSES: value moved, run up
+ok("press-artifact run: the press → BLACK ticks", game.clockRunSide === "b");
+NOW += 800; feed(2990, 3000, 0);                     // black thinks; run back down
+ok("press-artifact run: black still thinking → BLACK STILL TICKS", game.clockRunSide === "b");
+NOW += 800; feed(2990, 3000, 0);
+ok("...and it does not stop on the next poll either", game.clockRunSide === "b");
+NOW += 800; feed(2990, 2985, 1);                     // black presses back
+ok("press-artifact run: black pressed → white ticks", game.clockRunSide === "w");
+
+// === 6c. an ABSENT run key is silence, not "stopped" =======================
+// `!!undefined` is false, so a feed that merely omits the key on the odd poll
+// used to freeze the display on exactly those polls.
+reconnect();
+game.started = true; over = false; game.toMove = "w"; turnCertain = false;
+feed(3000, 3000, true); feed(3000, 3000, true);      // proven live on the idle repeat
+ok("(setup) run proven live → white ticks", game.clockRunSide === "w");
+sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
+  serialnr: "3000150100", state: "ACTIVE", board: MID,
+  clock: { white: hms(3000), black: hms(3000) } }] }) });   // no `run` key at all
+ok("run key absent → the feed said nothing, clock keeps running", game.clockRunSide === "w");
 
 // === 7. flagfall: feed-authoritative, once, re-arms ========================
 reconnect(); game.started = true; game.toMove = "w";

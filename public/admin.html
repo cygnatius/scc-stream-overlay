@@ -2665,7 +2665,10 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         if (!beatOk.value || !c) return "";
         const who = (s) => s === "w" ? "white" : s === "b" ? "black" : "—";
         return "white " + c.w + " · black " + c.b
-          + " · run " + JSON.stringify(c.run) + " (" + c.run_type + (c.saw_run ? ", trusted" : ", inferring")
+          + " · run " + JSON.stringify(c.run) + " (" + c.run_type
+          + (c.run_live ? ", live flag — its stop is obeyed"
+             : c.saw_run ? ", only ever seen at a press — stop IGNORED, inferring"
+             : ", never asserted — inferring")
           + (c.naming_disproved ? ", does NOT name sides — contradicted a press"
              : c.names_sides ? ", names the side" : "") + ")"
           + " · feed " + (c.live_tick ? "counts down between moves" : "changes at each press")
