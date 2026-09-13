@@ -71,7 +71,8 @@ operating the admin page: **SCC-Overlay-Manual-Setup.md**.
   Refresh). Requests from the display time out rather than hang, and a page
   whose requests have all hung for two minutes reloads itself.
   Regression suites: `node tools/engine-selftest.js .`,
-  `node tools/clock-selftest.js .`, `node tools/pgn-selftest.js .`
+  `node tools/clock-selftest.js .`, `node tools/pgn-selftest.js .`,
+  `node tools/legacy-clock-selftest.js .`
 
 ## Commentary ticker
 
@@ -160,9 +161,28 @@ it can't cry flag on a display clock that merely looks empty.
 ## The legacy single file
 
 `scc-stream-overlay.html` at the repo root is the previous self-contained
-overlay, kept untouched as the working reference until the served system has
-been venue-verified. Its setup docs described editing a `CONFIG` block by
-hand — that workflow is retired by the admin page.
+overlay, kept as the working reference until the served system has been
+venue-verified. Its setup docs described editing a `CONFIG` block by hand —
+that workflow is retired by the admin page.
+
+**It is no longer byte-untouched: the black-clock fix has been ported into
+it.** Three fixes for a frozen top clock went into the served overlay
+(`public/js/*`) while the venue kept reporting the same symptom — the shape of
+fixing a file that is not the one being loaded. The legacy file still carried
+the original defect (`CLOCK_RUN_SIDE = b.clock.run ? STATE.toMove : null`,
+which pins the tick to a guessed side after any mid-game adoption), so it now
+uses the same press-derived resolution and wall-anchored countdown as the
+served system. Regression suite: `node tools/legacy-clock-selftest.js .`
+
+**Which overlay is on air?** The server only ever serves `public/display.html`,
+so the legacy file can only reach OBS as a **Local file** source. Opened that
+way it now announces itself for six seconds at load with a red
+`LEGACY single-file · …` badge in the top-left corner. If you see that badge,
+OBS is on the legacy file and is missing everything the served system has
+gained since (board-offline handling, move-list lag fixes, live-ticking feeds);
+repoint the browser source at `http://127.0.0.1:8420/display.html`. Append
+`#live` to a legacy URL to silence the badge permanently once you have
+confirmed what you are running.
 
 ## Keep private
 

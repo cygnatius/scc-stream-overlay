@@ -491,16 +491,48 @@ function paintClocks(){
 STATE.white.sec = parseClock(STATE.white.clock);
 STATE.black.sec = parseClock(STATE.black.clock);
 paintClocks();
-// Which side's clock is actually running, per the DGT feed ('w' | 'b' | null).
-// null — before the game starts, or while both clocks are stopped between moves —
-// means nothing ticks; the displayed times just hold. This is set from the
-// LiveChess clock message (see the handler in connectLiveChess below).
+// Which side's clock is actually running ('w' | 'b' | null). null — before the
+// game starts, or while both clocks are stopped between moves — means nothing
+// ticks; the displayed times just hold. Set from the LiveChess clock message
+// (see the handler in connectLiveChess below).
 let CLOCK_RUN_SIDE = null;
+
+// The signals the run-side resolution is built from. Reset on a new game and on
+// a reconnect: values re-read across a gap say nothing about who is running.
+let LAST_CHANGED_SIDE = null;   // side whose feed value changed last
+let LAST_CHANGE       = null;   // { side, plies, sec, at } — the live-tick test
+let LIVE_TICK         = false;  // this feed counts the running clock down between moves
+let SAME_SIDE_DROPS   = 0;      // consecutive drops on one clock with no move between
+let SAW_RUN_TRUE      = false;  // this connection has seen clock.run asserted
+const LIVE_TICK_WINDOW_MS = 5000;
+const LIVE_TICK_DROPS     = 2;  // further drops needed after the first
+function resetClockSignals(){
+  LAST_CHANGED_SIDE = null; LAST_CHANGE = null;
+  LIVE_TICK = false; SAME_SIDE_DROPS = 0; SAW_RUN_TRUE = false;
+  CLOCK_RUN_SIDE = null; CLOCK_ANCHOR = null;
+}
+
+// The countdown is WALL-TIME ANCHORED, not decrement-per-fire. Subtracting one
+// second per interval fire silently LOSES time whenever the timer is late, and
+// OBS throttles a background tab — the on-screen clock fell behind the real one
+// and looked frozen. An anchor {sec, at} is taken whenever the running side
+// changes or the value is written from outside (a feed sync), and each fire
+// COMPUTES the value from real elapsed time, so a late fire lands on the correct
+// second instead of drifting. 250 ms so re-anchoring is prompt; the cadence no
+// longer affects the rate at all.
+let CLOCK_ANCHOR = null;                      // { side, sec, at, lastWritten }
 setInterval(function(){
-  if(!CLOCK_RUN_SIDE) return;                 // no clock running -> don't count down
-  const side = CLOCK_RUN_SIDE==="w" ? STATE.white : STATE.black;
-  if(side.sec!=null && side.sec>0){ side.sec-=1; paintClocks(); }
-}, 1000);
+  const s = CLOCK_RUN_SIDE;
+  if(!s){ CLOCK_ANCHOR = null; return; }      // no clock running -> hold
+  const obj = s==="w" ? STATE.white : STATE.black;
+  if(obj.sec==null){ CLOCK_ANCHOR = null; return; }
+  if(!CLOCK_ANCHOR || CLOCK_ANCHOR.side!==s || obj.sec!==CLOCK_ANCHOR.lastWritten){
+    CLOCK_ANCHOR = { side:s, sec:obj.sec, at:Date.now(), lastWritten:obj.sec };
+    return;
+  }
+  const next = Math.max(0, CLOCK_ANCHOR.sec - Math.floor((Date.now()-CLOCK_ANCHOR.at)/1000));
+  if(next !== obj.sec){ obj.sec = next; CLOCK_ANCHOR.lastWritten = next; paintClocks(); }
+}, 250);
 
 /* =========================================================================
    LIVE WIRING  —  fill CONFIG, save, reload the OBS browser source.
@@ -626,7 +658,9 @@ function pushState(){ STATE.fen=GAME.fen(); STATE.toMove=GAME.turn(); render(); 
 
 function newGameFromStart(){                                // board reset to the initial position
   GAME=new Chess(); STATE.moves=[]; STATE.currentPly=-1; STATE.lastMove=null;
-  GAME_STARTED=false; clearTimeout(LC_SNAP); LC_SNAP=null; pushState();
+  GAME_STARTED=false; clearTimeout(LC_SNAP); LC_SNAP=null;
+  resetClockSignals();      // last game's presses say nothing about this one
+  pushState();
 }
 function adoptPosition(placement){                          // first sync / last-resort desync recovery
   // We have no trustworthy move history for this position, so start a clean list from here.
@@ -736,27 +770,94 @@ function connectLiveChess(){
     if(b.board) applyPlacement(b.board);
     if(b.clock){
       // the feed only changes these at move-end; sync ONLY on a real change so the
-      // local per-second countdown isn't reset back every poll.
-      if(b.clock.white!==LC_LAST_W){ LC_LAST_W=b.clock.white; const s=lcClockSec(b.clock.white); if(s!=null) STATE.white.sec=s; }
-      if(b.clock.black!==LC_LAST_B){ LC_LAST_B=b.clock.black; const s=lcClockSec(b.clock.black); if(s!=null) STATE.black.sec=s; }
-      // Only tick a clock while the DGT feed says one is running — this is what stops the
-      // pre-game countdown. `clock.run` is a BOOLEAN: true while a clock is running, null/
-      // false when both are stopped (before the game starts and while it's paused). It does
-      // not name a side, so the running clock is simply the side to move. (The feed's white/
-      // black values hold steady between moves — confirmed live — so we tick locally and
-      // re-sync to the feed only when it changes, at move-end, above.)
-      CLOCK_RUN_SIDE = b.clock.run ? STATE.toMove : null;
+      // local countdown isn't reset back every poll.
+      let wChanged=false, bChanged=false;
+      if(b.clock.white!==LC_LAST_W){ LC_LAST_W=b.clock.white; const s=lcClockSec(b.clock.white); if(s!=null){ STATE.white.sec=s; wChanged=true; } }
+      if(b.clock.black!==LC_LAST_B){ LC_LAST_B=b.clock.black; const s=lcClockSec(b.clock.black); if(s!=null){ STATE.black.sec=s; bChanged=true; } }
+
+      // WHICH clock ticks. This used to be `b.clock.run ? STATE.toMove : null`,
+      // and that is the black-clock freeze: STATE.toMove is a GUESS after any
+      // mid-game adoption (a dropout, an OBS reload, a resync), and a wrong
+      // guess pins the tick to one side, so the thinking player's clock stands
+      // still through every think. `clock.run` cannot rescue it either — the
+      // value is ambiguous across firmware: side-naming builds send 1 meaning
+      // "white is running", plenty of boards send 1 meaning no more than "a
+      // clock is running", and read the wrong way it names white on every poll
+      // for a whole game.
+      //
+      // So the board's OWN clock changes decide it, and `run` is consulted only
+      // for whether anything is running at all:
+      //   - both values moved -> an adjust or a reset; tells us nothing
+      //   - one value moved   -> if the SAME side keeps dropping with no move
+      //                          between, this feed counts down live and the
+      //                          side dropping IS the runner; otherwise a value
+      //                          only changes at move-end, so the side that
+      //                          changed is the one who PRESSED and the runner
+      //                          is the other side.
+      // STATE.toMove survives only as the last resort, before any press is seen.
+      if(wChanged && bChanged){ LAST_CHANGED_SIDE=null; LAST_CHANGE=null; SAME_SIDE_DROPS=0; }
+      else if(wChanged || bChanged){
+        const side  = wChanged ? "w" : "b";
+        const sec   = side==="w" ? STATE.white.sec : STATE.black.sec;
+        const plies = STATE.moves.length;
+        if(LAST_CHANGE && LAST_CHANGE.side===side && LAST_CHANGE.plies===plies
+           && sec < LAST_CHANGE.sec && Date.now()-LAST_CHANGE.at <= LIVE_TICK_WINDOW_MS){
+          if(++SAME_SIDE_DROPS >= LIVE_TICK_DROPS) LIVE_TICK = true;
+        } else {
+          SAME_SIDE_DROPS = 0;            // alternated, jumped up, or a move landed
+        }
+        LAST_CHANGE = { side, plies, sec, at:Date.now() };
+        LAST_CHANGED_SIDE = side;
+      }
+      const pressSide = !LAST_CHANGED_SIDE ? null
+        : LIVE_TICK ? LAST_CHANGED_SIDE                      // the side counting down is running
+        : (LAST_CHANGED_SIDE==="w" ? "b" : "w");             // the side that pressed is not
+      if(b.clock.run) SAW_RUN_TRUE = true;
+      // A board that never asserts run at all falls back to inferring from game
+      // state, so the pre-game hold still works: STATE.moves is empty until the
+      // first move lands.
+      const started = STATE.moves.length > 0;
+      const over    = (typeof GAME!=="undefined" && GAME && typeof GAME.game_over==="function")
+                    ? GAME.game_over() : false;
+      const believedRunning = SAW_RUN_TRUE ? !!b.clock.run : (started && !over);
+      CLOCK_RUN_SIDE = !believedRunning ? null : (pressSide || STATE.toMove);
       paintClocks();
     }
   };
-  ws.onclose=()=>{ clearInterval(timer); setTimeout(connectLiveChess,3000); };
+  // Nothing ticks while disconnected, and the clock signals are dropped: the
+  // values re-read on the next connection say nothing about who was running.
+  ws.onclose=()=>{ clearInterval(timer); resetClockSignals(); LC_LAST_W=null; LC_LAST_B=null; setTimeout(connectLiveChess,3000); };
   ws.onerror=()=>{ try{ ws.close(); }catch(e){} };
 }
 
 /* ---------- BOOT --------------------------------------------------------- */
 /* Build marker — check the browser console (F12) to confirm you're on the      */
 /* latest overlay and not a stale cached copy.                                  */
-console.info("SCC overlay build: never-wipe-moves 2026-07-14b");
+const LEGACY_BUILD = "LEGACY single-file · press-side clock 2026-09-13";
+console.info("SCC overlay build: " + LEGACY_BUILD);
+
+/* Which overlay is on air? Three black-clock fixes went into the SERVED system
+   (public/js/*) while the venue kept reporting a frozen top clock — the shape of
+   fixing a file that is not the one being loaded. There was no way to tell the
+   two apart on screen, so: when this file is opened as a LOCAL FILE (which is
+   the only way OBS can reach it — the server only ever serves public/display.html)
+   it announces itself for six seconds and then gets out of the way.
+
+   Append #live to the OBS browser-source URL to silence it permanently once you
+   have confirmed which overlay you are running. */
+if(location.protocol === "file:" && location.hash !== "#live"){
+  window.addEventListener("DOMContentLoaded", function(){
+    const tag = document.createElement("div");
+    tag.textContent = LEGACY_BUILD;
+    tag.style.cssText = "position:fixed;left:8px;top:8px;z-index:99999;"
+      + "font:600 12px/1.4 system-ui,sans-serif;letter-spacing:.04em;"
+      + "color:#fff;background:rgba(180,30,30,.85);padding:4px 10px;"
+      + "border-radius:6px;pointer-events:none;transition:opacity .6s";
+    document.body.appendChild(tag);
+    setTimeout(function(){ tag.style.opacity = "0"; }, 6000);
+    setTimeout(function(){ tag.remove(); }, 7000);
+  });
+}
 /* Pairingsman is the master toggle: ON overrides names/ratings/round/         */
 /* tournament/record from the API; OFF keeps whatever you typed in STATE.       */
 if(CONFIG.pairingsman.enabled){
