@@ -161,21 +161,46 @@ SCC.livechess = (function () {
   let lastMonitorAt = 0;
 
   /* ---- clock running + flagfall -----------------------------------------
-     The per-second countdown is gated on the DGT feed's `clock.run`. On some
-     boards/firmware that flag is never asserted, and then the display only
-     jumped at each move-end sync instead of ticking — "the clock only counts
-     down some of the time." So the gate ADAPTS: if this connection has ever
-     seen run asserted, we trust it exactly as before (no change on hardware
-     that reports it, incl. the test rig). If it has NEVER been asserted, we
-     fall back to inferring from game state — the side to move's clock runs
-     once the game is under way and until it is over. Pre-game is still quiet
-     because game.started is false until the first move.
+     WHETHER anything is ticking. The obvious gate is the DGT feed's
+     `clock.run`, and it is not trustworthy enough to be obeyed on its own:
+
+       - Some boards never assert it. The display then only jumped at each
+         move-end sync instead of ticking — "the clock only counts down some
+         of the time" (PR #8).
+       - Some assert it only AT THE PRESS and report 0 (or drop the key) on
+         the polls in between. Obeyed literally that says "both clocks are
+         stopped" for the whole of every think — the clock stands still while
+         a player is on the move. This is the venue's frozen top clock, and it
+         survived three goes at the WHICH-side logic because it is a
+         WHETHER-anything bug: no side resolution can help once the gate has
+         already decided nothing is running.
+       - Some omit `run` on the odd poll. An absent key is the feed declining
+         to say, NOT a claim that the clock stopped, and reading `!!undefined`
+         as "stopped" froze the display on exactly those polls.
+
+     So `run` earns its authority instead of being handed it. A stop is
+     believed only once the feed has PROVEN run is a live flag by asserting it
+     on an idle poll — one that carries no clock change and no new placement,
+     i.e. between presses, when a genuine running flag is still up and a
+     press-instant artifact has already gone back down. Until that proof, and
+     whenever the key is simply absent, the gate infers from game state: the
+     side to move's clock runs once the game is under way and until it is
+     over. Pre-game stays quiet either way, because game.started is false
+     until the first move lands.
+
+     Cost of the trade, stated plainly: on a board that never proves its run
+     flag, a genuine mid-game PAUSE (clock stopped for a dispute, say) will
+     keep counting down on screen until play resumes. A clock that runs on
+     through a pause is a visibly wrong clock for a minute; a clock frozen
+     through every think is a dead clock all game. Diag reports which gate is
+     in force (`run_live`), so this is diagnosable rather than mysterious.
 
      Flagfall is FEED-AUTHORITATIVE: it fires only when the feed itself
      delivers a clock value of zero, never from the local countdown (which is
      a display estimate). Latched per side so it fires once, and re-armed when
      the feed shows that clock positive again (a new game or a clock reset).  */
-  let sawRunTrue = false;
+  let sawRunTrue = false;                // this connection has seen run asserted
+  let runIsLive = false;                 // ...on an idle poll: run tracks the running state
   const flagged = { w: false, b: false };
 
   /* ---- which clock is ticking -------------------------------------------
@@ -275,6 +300,7 @@ SCC.livechess = (function () {
     LC_LAST_W = undefined; LC_LAST_B = undefined;
     clockResyncPending = true;
     sawRunTrue = false;                        // re-learn this board's run semantics on reconnect
+    runIsLive = false;
     sawRunTwo = false;
     namingDisproved = false;
     lastChangedSide = null;
@@ -413,8 +439,11 @@ SCC.livechess = (function () {
       // The scene auto-detector needs this: the DGT "result" signal (both kings
       // placed on the centre squares) is exactly the kind of unreachable
       // placement the move engine deliberately holds and hides.
+      let placementChanged = false;
       if (b.board) {
-        game.rawPlacement = String(b.board).split(" ")[0];
+        const placement = String(b.board).split(" ")[0];
+        placementChanged = placement !== game.rawPlacement;
+        game.rawPlacement = placement;
         // pieces back on the start squares = a new game: last move-end info
         // belongs to the previous one
         if (game.rawPlacement === SCC.moves.START_PLACEMENT) { lastChangedSide = null; lastChange = null; }
@@ -461,8 +490,18 @@ SCC.livechess = (function () {
         const pressSide = !lastChangedSide ? null
           : liveTick ? lastChangedSide                         // the side counting down is running
           : (lastChangedSide === "w" ? "b" : "w");             // the side that pressed is not
-        if (b.clock.run) sawRunTrue = true;
-        const believedRunning = sawRunTrue ? !!b.clock.run : (game.started && !st.over);
+        // An ABSENT run is the feed declining to say, not a claim of "stopped".
+        const runSays = b.clock.run == null ? null : !!b.clock.run;
+        if (runSays) {
+          sawRunTrue = true;
+          // Asserted on an IDLE poll — no clock change, no new placement, so we
+          // are between presses. Only a genuinely live flag is still up here; a
+          // press-instant artifact has already dropped back. That is the proof
+          // that lets this board's zeros stop the clocks.
+          if (!wChanged && !bChanged && !placementChanged) runIsLive = true;
+        }
+        const runTrusted = runSays !== null && sawRunTrue && runIsLive;
+        const believedRunning = runTrusted ? runSays : (game.started && !st.over);
         const named = runnerFromRun(b.clock.run);
         // A named side that disagrees with the board's own presses is a
         // misread run value: stop naming from it for this connection.
@@ -479,11 +518,12 @@ SCC.livechess = (function () {
           run: b.clock.run === undefined ? null : b.clock.run,
           run_type: typeof b.clock.run,
           saw_run: sawRunTrue,
+          run_live: runIsLive,           // run proven to track running state (its 0 is believed)
           names_sides: sawRunTwo && !namingDisproved,
           naming_disproved: namingDisproved,
           live_tick: liveTick,
           last_changed: lastChangedSide,
-          from: !believedRunning ? "stopped"
+          from: !believedRunning ? (runTrusted ? "run says stopped" : "the game is not under way")
             : pressSide ? (liveTick ? "the clock counting down" : "the last press")
             : st.turn_certain ? "the tracked turn"
             : named ? "run naming the side"
