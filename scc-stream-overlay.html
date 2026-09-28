@@ -491,26 +491,12 @@ function paintClocks(){
 STATE.white.sec = parseClock(STATE.white.clock);
 STATE.black.sec = parseClock(STATE.black.clock);
 paintClocks();
-// Which side's clock is actually running ('w' | 'b' | null). null — before the
-// game starts, or while both clocks are stopped between moves — means nothing
-// ticks; the displayed times just hold. Set from the LiveChess clock message
-// (see the handler in connectLiveChess below).
+// Which side's clock is actually running ('w' | 'b' | null). The side to move
+// ticks while the game is under way; null before the first move, after the
+// game ends, and while disconnected. Set from the LiveChess handler below.
 let CLOCK_RUN_SIDE = null;
-
-// The signals the run-side resolution is built from. Reset on a new game and on
-// a reconnect: values re-read across a gap say nothing about who is running.
-let LAST_CHANGED_SIDE = null;   // side whose feed value changed last
-let LAST_CHANGE       = null;   // { side, plies, sec, at } — the live-tick test
-let LIVE_TICK         = false;  // this feed counts the running clock down between moves
-let SAME_SIDE_DROPS   = 0;      // consecutive drops on one clock with no move between
-let SAW_RUN_TRUE      = false;  // this connection has seen clock.run asserted
-let RUN_IS_LIVE       = false;  // ...on an IDLE poll: run tracks the running state, so its 0 counts
-const LIVE_TICK_WINDOW_MS = 5000;
-const LIVE_TICK_DROPS     = 2;  // further drops needed after the first
 function resetClockSignals(){
-  LAST_CHANGED_SIDE = null; LAST_CHANGE = null;
-  LIVE_TICK = false; SAME_SIDE_DROPS = 0; SAW_RUN_TRUE = false; RUN_IS_LIVE = false;
-  LC_LAST_PLACEMENT = null;   // the next placement is "new" again, so it can't prove a live run
+  LC_LAST_PLACEMENT = null;
   CLOCK_RUN_SIDE = null; CLOCK_ANCHOR = null;
 }
 
@@ -770,84 +756,25 @@ function connectLiveChess(){
     if(!b) b = boards.find(x=>x.state==="ACTIVE") || boards[0];
     if(!b) return;
     LC_SERIAL = b.serialnr || LC_SERIAL;
-    let placementChanged = false;
     if(b.board){
-      const placement = String(b.board).split(" ")[0];
-      placementChanged = placement !== LC_LAST_PLACEMENT;
-      LC_LAST_PLACEMENT = placement;
+      LC_LAST_PLACEMENT = String(b.board).split(" ")[0];
       applyPlacement(b.board);
     }
     if(b.clock){
       // the feed only changes these at move-end; sync ONLY on a real change so the
       // local countdown isn't reset back every poll.
-      let wChanged=false, bChanged=false;
-      if(b.clock.white!==LC_LAST_W){ LC_LAST_W=b.clock.white; const s=lcClockSec(b.clock.white); if(s!=null){ STATE.white.sec=s; wChanged=true; } }
-      if(b.clock.black!==LC_LAST_B){ LC_LAST_B=b.clock.black; const s=lcClockSec(b.clock.black); if(s!=null){ STATE.black.sec=s; bChanged=true; } }
+      if(b.clock.white!==LC_LAST_W){ LC_LAST_W=b.clock.white; const s=lcClockSec(b.clock.white); if(s!=null) STATE.white.sec=s; }
+      if(b.clock.black!==LC_LAST_B){ LC_LAST_B=b.clock.black; const s=lcClockSec(b.clock.black); if(s!=null) STATE.black.sec=s; }
 
-      // WHICH clock ticks. This used to be `b.clock.run ? STATE.toMove : null`,
-      // and that is the black-clock freeze: STATE.toMove is a GUESS after any
-      // mid-game adoption (a dropout, an OBS reload, a resync), and a wrong
-      // guess pins the tick to one side, so the thinking player's clock stands
-      // still through every think. `clock.run` cannot rescue it either — the
-      // value is ambiguous across firmware: side-naming builds send 1 meaning
-      // "white is running", plenty of boards send 1 meaning no more than "a
-      // clock is running", and read the wrong way it names white on every poll
-      // for a whole game.
-      //
-      // So the board's OWN clock changes decide it, and `run` is consulted only
-      // for whether anything is running at all:
-      //   - both values moved -> an adjust or a reset; tells us nothing
-      //   - one value moved   -> if the SAME side keeps dropping with no move
-      //                          between, this feed counts down live and the
-      //                          side dropping IS the runner; otherwise a value
-      //                          only changes at move-end, so the side that
-      //                          changed is the one who PRESSED and the runner
-      //                          is the other side.
-      // STATE.toMove survives only as the last resort, before any press is seen.
-      if(wChanged && bChanged){ LAST_CHANGED_SIDE=null; LAST_CHANGE=null; SAME_SIDE_DROPS=0; }
-      else if(wChanged || bChanged){
-        const side  = wChanged ? "w" : "b";
-        const sec   = side==="w" ? STATE.white.sec : STATE.black.sec;
-        const plies = STATE.moves.length;
-        if(LAST_CHANGE && LAST_CHANGE.side===side && LAST_CHANGE.plies===plies
-           && sec < LAST_CHANGE.sec && Date.now()-LAST_CHANGE.at <= LIVE_TICK_WINDOW_MS){
-          if(++SAME_SIDE_DROPS >= LIVE_TICK_DROPS) LIVE_TICK = true;
-        } else {
-          SAME_SIDE_DROPS = 0;            // alternated, jumped up, or a move landed
-        }
-        LAST_CHANGE = { side, plies, sec, at:Date.now() };
-        LAST_CHANGED_SIDE = side;
-      }
-      const pressSide = !LAST_CHANGED_SIDE ? null
-        : LIVE_TICK ? LAST_CHANGED_SIDE                      // the side counting down is running
-        : (LAST_CHANGED_SIDE==="w" ? "b" : "w");             // the side that pressed is not
-      // WHETHER anything ticks. `run` is not trustworthy enough to be obeyed on
-      // its own: some boards never assert it (then the clock only jumped at
-      // move-end), some assert it only AT THE PRESS and report 0 in between —
-      // obeyed literally that stops both clocks for the whole of every think,
-      // which is the venue's frozen top clock — and some omit the key on the odd
-      // poll, where `!!undefined` read as "stopped" froze the display outright.
-      //
-      // So a STOP is believed only once this board has PROVEN run is a live flag
-      // by asserting it on an idle poll: no clock change and no new placement,
-      // i.e. between presses, where a real running flag is still up and a
-      // press-instant artifact has already dropped back. Until then, and
-      // whenever the key is absent, infer from game state — which also keeps the
-      // pre-game hold, since STATE.moves is empty until the first move lands.
-      // Trade-off: on a board that never proves its flag, a genuine mid-game
-      // PAUSE keeps counting down on screen. A clock that over-runs a pause is
-      // wrong for a minute; a clock frozen through every think is dead all game.
-      const runSays = b.clock.run == null ? null : !!b.clock.run;
-      if(runSays){
-        SAW_RUN_TRUE = true;
-        if(!wChanged && !bChanged && !placementChanged) RUN_IS_LIVE = true;
-      }
+      // The side to move ticks while the game is under way. That is what a
+      // chess clock does. `clock.run` is NOT consulted: five attempts to read
+      // the running side out of the feed (run as a boolean gate, run as a side
+      // name, which value changed last, live-tick detection) each froze the
+      // black clock on some firmware. STATE.toMove is kept by the move tracker.
       const started = STATE.moves.length > 0;
       const over    = (typeof GAME!=="undefined" && GAME && typeof GAME.game_over==="function")
                     ? GAME.game_over() : false;
-      const believedRunning = (runSays!==null && SAW_RUN_TRUE && RUN_IS_LIVE)
-                            ? runSays : (started && !over);
-      CLOCK_RUN_SIDE = !believedRunning ? null : (pressSide || STATE.toMove);
+      CLOCK_RUN_SIDE = (started && !over) ? STATE.toMove : null;
       paintClocks();
     }
   };
@@ -860,7 +787,7 @@ function connectLiveChess(){
 /* ---------- BOOT --------------------------------------------------------- */
 /* Build marker — check the browser console (F12) to confirm you're on the      */
 /* latest overlay and not a stale cached copy.                                  */
-const LEGACY_BUILD = "LEGACY single-file · run-gate fix 2026-09-13b";
+const LEGACY_BUILD = "LEGACY single-file · side-to-move clock 2026-09-28";
 console.info("SCC overlay build: " + LEGACY_BUILD);
 
 /* Which overlay is on air? Three black-clock fixes went into the SERVED system

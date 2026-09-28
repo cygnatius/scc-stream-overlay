@@ -5,22 +5,19 @@
 
      node tools/legacy-clock-selftest.js .
 
-   Why this exists. Three black-clock fixes went into the SERVED overlay
-   (public/js/*) while the venue kept reporting a frozen top clock — the shape
-   of fixing a file that is not the one being loaded. The legacy single file is
-   reachable from OBS as a local file and still carried the ORIGINAL defect:
+   Why this exists. The legacy single file is reachable from OBS as a local
+   file, so every clock fix has to land here as well as in public/js/*.
 
-       CLOCK_RUN_SIDE = b.clock.run ? STATE.toMove : null
+   THE RULE under test: the clock of the side to move counts down while the
+   game is under way. `clock.run` — in any shape — decides nothing. Five fixes
+   read the running side out of the feed (run as a boolean gate, run as a side
+   name, which value changed last, live-tick detection) and the black clock
+   kept freezing at the venue; this suite pins the opposite.
 
-   STATE.toMove is a GUESS after any mid-game adoption (a dropout, an OBS
-   reload, a resync), and a wrong guess pins the tick to one side, so the
-   thinking player's clock stands still for the rest of the game. The scenarios
-   below pin the replacement: the running side comes from the board's OWN clock
-   changes, and toMove is only the last resort.
-
-   Covers: the press-derived side (incl. beating a WRONG toMove), a live-ticking
-   feed, the run gate and the pre-game hold, the wall-anchored countdown (a
-   throttled fire lands on the true value, never drifts), and the resets. */
+   Covers: the pre-game hold, the side to move ticking through every `run`
+   value the venue has sent, feed value changes re-syncing without picking a
+   side, the wall-anchored countdown (a throttled fire lands on the true value,
+   never drifts), and the resets. */
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -51,10 +48,6 @@ const probe = `
 globalThis.__legacy = {
   STATE:        () => STATE,
   runSide:      () => CLOCK_RUN_SIDE,
-  lastChanged:  () => LAST_CHANGED_SIDE,
-  liveTick:     () => LIVE_TICK,
-  sawRun:       () => SAW_RUN_TRUE,
-  runLive:      () => RUN_IS_LIVE,
   anchor:       () => CLOCK_ANCHOR,
   CONFIG:       () => CONFIG,
   connect:      () => connectLiveChess(),
@@ -125,9 +118,10 @@ function tick(seconds) { NOW += seconds * 1000; clockTimer.fn(); }
 const MID = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPPPPPP/RNBQKBNR";
 const hms = (s) => Math.floor(s / 3600) + ":" + String(Math.floor((s % 3600) / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
 function feed(white, black, run, placement) {
+  const clock = { white: hms(white), black: hms(black) };
+  if (run !== undefined) clock.run = run;      // undefined = the key is ABSENT
   sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
-    serialnr: "3000150100", state: "ACTIVE", board: placement || MID,
-    clock: { white: hms(white), black: hms(black), run } }] }) });
+    serialnr: "3000150100", state: "ACTIVE", board: placement || MID, clock }] }) });
 }
 
 L.CONFIG().livechess.host = "127.0.0.1:1982";
@@ -139,100 +133,55 @@ console.log("\nLEGACY overlay — clock scenarios\n");
 
 /* Settle the board first. The FIRST placement of a connection is adopted, and
    an adoption starts a clean move list — so anything a scenario wants in
-   STATE.moves has to be put there after that has happened, not before. This
-   message also carries both clock values as "changed" (we had none), which is
-   why it can say nothing about a side. */
+   STATE.moves has to be put there after that has happened, not before. */
 feed(3000, 3000, true);
+
+/* === 1. pre-game hold, then the side to move ============================== */
+ok("no move yet → nothing ticks (even with run=true)", L.runSide() === null);
 L.STATE().moves = ["e4"];                       // game under way
-L.STATE().toMove = "w";
-
-/* === 1. no clock change yet → nothing to read a side from ================= */
-/* An idle repeat: same placement, same values. It is also where a genuine run
-   flag proves itself — still asserted between presses, where a press-instant
-   artifact would already have dropped back to 0. */
-feed(3000, 3000, true);
-ok("no clock change yet → no side info, falls back to toMove",
-   L.runSide() === "w" && L.lastChanged() === null);
-ok("run asserted on an idle poll → proven a live flag", L.sawRun() === true);
-
-/* === 2. THE REGRESSION: a press beats a WRONG toMove ====================== */
-/* White presses — white's value drops, black's holds — while toMove is still
-   the wrong "w" from a mid-game adoption. The old code ran white here and the
-   venue watched black's clock stand still. */
-feed(2900, 3000, true);
-ok("white pressed + WRONG toMove='w' → BLACK runs (the freeze fix)",
-   L.runSide() === "b" && L.STATE().toMove === "w");
-
-feed(2900, 2880, true);
-ok("black pressed → white runs", L.runSide() === "w");
-
-/* === 3. the run gate ====================================================== */
-feed(2800, 2880, false);
-ok("run=false → nothing ticks", L.runSide() === null);
-feed(2700, 2880, true);
-ok("run back to true → resumes", L.runSide() !== null);
-
-/* === 4. a live-ticking feed: the side counting down IS the runner ========= */
-/* Some firmware counts the running clock down between moves. Read as presses
-   that would name the wrong side on every message. Two further drops on the
-   same clock with no move in between prove the feed ticks live. */
-L.newGame();
-L.STATE().moves = ["e4"];
 L.STATE().toMove = "b";
-feed(3000, 3000, true);                         // re-anchor after the reset
-feed(3000, 2990, true);
-feed(3000, 2989, true);
-feed(3000, 2988, true);
-ok("same clock dropping with no move between → live-ticking feed detected", L.liveTick() === true);
-ok("...and the side counting down is the one running", L.runSide() === "b");
-
-/* === 5. pre-game hold on hardware that never asserts run ================== */
-L.newGame();                                    // clears moves → not started
-feed(3000, 3000, undefined);
-ok("never-asserts-run + no moves → pre-game hold, nothing ticks", L.runSide() === null);
-L.STATE().moves = ["e4"];
-feed(3000, 2990, undefined);
-ok("...and once a move has landed it infers from game state", L.runSide() !== null);
-
-/* === 5b. run asserted only AT THE PRESS — the venue freeze ================ */
-/* The board flicks run up on the press message and reports 0 on the polls in
-   between. Obeyed literally that says "both clocks stopped" for the whole of
-   every think — the thinking player's clock stands still all game. No amount of
-   WHICH-side work can reach this: the gate has already decided nothing runs.
-   A run flag never seen up on an idle poll has not earned the right to stop
-   anything. */
-L.newGame();
-feed(4000, 4000, 0);                            // settle the board (this adoption wipes the list)
-L.STATE().moves = ["e4"];                       // ...so put the game under way after it, not before
-L.STATE().toMove = "w";                         // the wrong guess a mid-game adoption leaves
-ok("(setup) press-artifact board proves nothing", L.runLive() === false);
-feed(3990, 4000, 1);                            // WHITE PRESSES: value moves, run flicks up
-ok("press-artifact run: the press → BLACK runs", L.runSide() === "b");
-feed(3990, 4000, 0);                            // black thinks; run back down, values hold
-ok("press-artifact run: black still thinking → BLACK STILL RUNS", L.runSide() === "b");
-feed(3990, 4000, 0);
-ok("...and it does not stop on the next poll either", L.runSide() === "b");
-feed(3990, 3980, 1);                            // black presses back
-ok("press-artifact run: black pressed → white runs", L.runSide() === "w");
-
-/* === 5c. an ABSENT run key is silence, not "stopped" ====================== */
-/* `!!undefined` is false, so a feed that merely omits the key on the odd poll
-   used to freeze the display on exactly those polls. */
-L.newGame();
-feed(5000, 5000, true);                         // settle
-feed(5000, 5000, true);                         // idle repeat → the flag proves itself live
-ok("(setup) run proven live on this board", L.runLive() === true);
-L.STATE().moves = ["e4"];
+feed(3000, 3000, true);
+ok("black to move → BLACK ticks", L.runSide() === "b");
 L.STATE().toMove = "w";
-feed(5000, 5000, undefined);                    // no `run` key at all
-ok("run key absent → the feed said nothing, the clock keeps running", L.runSide() === "w");
+feed(3000, 3000, true);
+ok("white to move → WHITE ticks", L.runSide() === "w");
 
-/* === 6. the countdown is WALL-ANCHORED, not decrement-per-fire ============ */
+/* === 2. `run` changes NOTHING — the venue freeze in each of its guises ===== */
+L.STATE().toMove = "b";
+feed(3000, 3000, 0);
+ok("black to move, run=0 → BLACK TICKS (the freeze)", L.runSide() === "b");
+feed(3000, 3000, 0);
+ok("...and on the next idle poll", L.runSide() === "b");
+feed(3000, 3000, false);
+ok("run=false → still BLACK", L.runSide() === "b");
+feed(3000, 3000, 1);
+ok("run=1 (would once have named WHITE) → still BLACK", L.runSide() === "b");
+feed(3000, 3000, 2);
+ok("run=2 → still BLACK", L.runSide() === "b");
+feed(3000, 3000);                               // no `run` key at all
+ok("run key absent → still BLACK", L.runSide() === "b");
+L.STATE().toMove = "w";
+feed(3000, 3000, 2);
+ok("white to move, run=2 (would once have named BLACK) → WHITE ticks", L.runSide() === "w");
+
+/* === 3. feed value changes re-sync, never pick the side =================== */
+L.STATE().toMove = "b";
+feed(2900, 3000, true);                         // white's value drops
+ok("white's value changed → re-synced to 2900", L.STATE().white.sec === 2900);
+ok("...and black (to move) still ticks", L.runSide() === "b");
+feed(2900, 2990, true); feed(2900, 2989, true); feed(2900, 2988, true);   // a live-ticking feed
+ok("black's clock counting down between moves → re-synced, side unchanged",
+   L.STATE().black.sec === 2988 && L.runSide() === "b");
+L.STATE().toMove = "w";
+feed(2800, 2800, true);                         // both change (operator adjust)
+ok("both values changed → adopted, white (to move) ticks",
+   L.STATE().white.sec === 2800 && L.STATE().black.sec === 2800 && L.runSide() === "w");
+
+/* === 4. the countdown is WALL-ANCHORED, not decrement-per-fire ============ */
 L.newGame();
 L.STATE().moves = ["e4"];
 L.STATE().toMove = "b";
 feed(3000, 3000, true);
-feed(2900, 3000, true);                         // white pressed → black runs
 ok("(setup) black is the running side", L.runSide() === "b");
 tick(0);                                        // take the anchor
 tick(1);
@@ -244,15 +193,16 @@ const heldWhite = L.STATE().white.sec;
 tick(5);
 ok("the idle side is untouched", L.STATE().white.sec === heldWhite);
 
-/* === 7. resets ============================================================ */
+/* === 5. resets ============================================================ */
 L.newGame();
-ok("new game clears the press signals", L.lastChanged() === null && L.liveTick() === false);
+ok("new game → nothing ticks until a move lands", L.runSide() === null);
 feed(3000, 3000, true);
-feed(2900, 3000, true);
-ok("(setup) a press is tracked again", L.lastChanged() === "w");
+ok("...still nothing after a feed message with no moves", L.runSide() === null);
+L.STATE().moves = ["e4"]; L.STATE().toMove = "b";
+feed(3000, 3000, true);
+ok("(setup) ticking again", L.runSide() === "b");
 sock.onclose();
-ok("a disconnect stops the clock and drops the signals",
-   L.runSide() === null && L.lastChanged() === null);
+ok("a disconnect stops the clock", L.runSide() === null);
 
 console.log("");
 if (failed) { console.log(`${failed} FAILED, ${passed} passed`); process.exit(1); }

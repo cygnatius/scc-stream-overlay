@@ -2658,23 +2658,15 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         return { d, label: secs == null ? "waiting for the first board message" : "live, last board message " + secs + "s ago", cls: "ok" };
       });
 
-      // Raw clock feed line — so a wrong ticking side is diagnosable from the
-      // venue instead of guessed at afterwards.
+      // Raw clock feed line. The side to move ticks; `run` is shown so the
+      // operator can see what the board sends, but it is not obeyed.
       const clockDiag = computed(() => {
         const c = state.st && state.st.feed && state.st.feed.clock;
         if (!beatOk.value || !c) return "";
-        const who = (s) => s === "w" ? "white" : s === "b" ? "black" : "—";
         return "white " + c.w + " · black " + c.b
-          + " · run " + JSON.stringify(c.run) + " (" + c.run_type
-          + (c.run_live ? ", live flag — its stop is obeyed"
-             : c.saw_run ? ", only ever seen at a press — stop IGNORED, inferring"
-             : ", never asserted — inferring")
-          + (c.naming_disproved ? ", does NOT name sides — contradicted a press"
-             : c.names_sides ? ", names the side" : "") + ")"
-          + " · feed " + (c.live_tick ? "counts down between moves" : "changes at each press")
-          + " · last change " + who(c.last_changed)
+          + " · run " + JSON.stringify(c.run) + " (" + c.run_type + ", shown only — not obeyed)"
           + " · ticking " + (c.side === "w" ? "white" : c.side === "b" ? "black" : "nobody")
-          + " (from " + c.from + ")";
+          + " (" + c.from + ")";
       });
 
       // What Clear all would remove right now — the same button sits on the
