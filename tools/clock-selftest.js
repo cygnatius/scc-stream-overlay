@@ -1,33 +1,29 @@
 /* Headless test for livechess.js clock ticking + flagfall, driven directly
    (no browser, no timer throttling). Loads the REAL clock.js + livechess.js in
    a vm with stubbed WebSocket / moves / timers, and feeds crafted board
-   messages. Run after any change to the clock gate or flag logic:
+   messages. Run after any change to the clock or flag logic:
 
      node tools/clock-selftest.js .
 
-   Covers the tick-side resolution (the venue black-clock freeze). The rule
-   under test: the POSITION decides WHICH clock runs; `run` decides only
-   WHETHER one runs, and names a side purely as a last resort.
-     1. the board's own clock CHANGES come first. On a move-end feed the side
-        that changed has just pressed, so the OTHER side runs; on a live-
-        ticking feed the side that changed IS the one running. Which shape the
-        feed has is learned from the feed, slowly and reversibly.
-     2. then game.toMove, but only while the move engine is certain of it.
-     3. then run naming a side — and a name that contradicts a press is thrown
-        away for the rest of the connection, so one stray 2 can never pin the
-        tick to white for a whole game.
-     4. then game.toMove as a bare guess (an adoption's inherited turn).
-   Plus: the run-flag trust/inference gate, the pre-game hold, and
-   feed-authoritative flagfall (fires from a feed zero, never the local
-   countdown; once per side; re-arms for a new game).
-
-   Sept 2026 meet additions:
+   THE RULE under test: the clock of the side to move counts down while the
+   game is under way. Nothing in the LiveChess feed decides which clock ticks
+   or whether one does — not `clock.run` as a boolean, not `run` as a side
+   name, not which value changed last. Five fixes read those signals and the
+   black clock kept freezing at the venue, so this suite pins the opposite:
+     1. before the first move nothing ticks; after it, the side to move ticks.
+     2. `run` — 0, 1, 2, true, false, absent — changes NOTHING about the tick.
+     3. a feed value change re-syncs that clock but does not pick the side.
+     4. game over → nothing ticks.
+   Plus feed-authoritative flagfall (fires from a feed zero, never the local
+   countdown; once per side; re-arms for a new game), the wall-anchored
+   countdown, and the connection scenarios from the Sept 2026 meet:
      9. LiveChess reporting the board INACTIVE (lost) — a stand-in placement
         and no clock. Must NOT reach the move engine, must freeze the clocks,
         and must hand the board back (gap + clock re-read) when it returns.
     10. clock: null on a live board → nothing ticks.
     11. A socket stuck CONNECTING is abandoned after its deadline.
-    12. Time the PAGE was asleep is never counted as feed silence. */
+    12. Time the PAGE was asleep is never counted as feed silence.
+    13. An INACTIVE board that HAS a source is a real board. */
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -45,11 +41,10 @@ const MID = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPPPPPP/RNBQKBNR";   // after 1.e4 —
 const game = { toMove: "w", started: false, moves: [], white: { sec: null }, black: { sec: null },
   clockRunSide: null, flagfall: null, lcConnected: false, rawPlacement: null, demo: false };
 let over = false;
-let turnCertain = false;                              // move engine sure of the side to move
 let applied = 0, gaps = 0;                            // calls into the move engine
 const movesStub = { applyPlacement() { applied++; }, syncClock() {}, noteFeedGap() { gaps++; }, reset() {},
   START_PLACEMENT: START,
-  gameStatus() { return { tracking: true, over, turn_certain: turnCertain }; } };
+  gameStatus() { return { tracking: true, over, turn_certain: true }; } };
 
 let sock = null;
 // readyState defaults to OPEN so the existing scenarios (which drive onopen by
@@ -75,161 +70,78 @@ sock.onopen();
 
 const hms = (s) => Math.floor(s / 3600) + ":" + String(Math.floor((s % 3600) / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
 function feed(white, black, run, placement) {
+  const clock = { white: hms(white), black: hms(black) };
+  if (run !== undefined) clock.run = run;             // undefined = the key is ABSENT
   sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
-    serialnr: "3000150100", state: "ACTIVE", board: placement || MID,
-    clock: { white: hms(white), black: hms(black), run } }] }) });
+    serialnr: "3000150100", state: "ACTIVE", board: placement || MID, clock }] }) });
 }
 function reconnect() { sock.onclose();
   LiveChess.apply({ host: "127.0.0.1", port: 1982, serialnr: "X", poll_ms: 800, demo_mode: false });
   LiveChess.apply({ host: "127.0.0.1", port: 1982, serialnr: "3000150100", poll_ms: 800, demo_mode: false });
   sock.onopen(); }
 
-// === 1. boolean run, no change info yet → toMove fallback =================
-game.started = true; game.toMove = "w"; turnCertain = false;
+// === 1. the side to move ticks once the game is under way =================
+game.started = false; game.toMove = "w"; over = false;
 feed(3000, 3000, true);
-ok("boolean run, no change info → toMove fallback", game.clockRunSide === "w");
-// run=false is only obeyed once this board has PROVEN run is a live flag, by
-// asserting it on an idle poll (no clock change, no new placement — i.e.
-// between presses). The message above was this connection's first and carried
-// a new placement, so it proves nothing; this repeat of it is the idle poll.
+ok("before the first move → nothing ticks (even with run=true)", game.clockRunSide === null);
+game.started = true; game.toMove = "b";              // 1.e4 landed, black to move
 feed(3000, 3000, true);
-ok("run asserted on an idle poll → proven a live flag", game.clockRunSide === "w");
+ok("game under way, black to move → BLACK ticks", game.clockRunSide === "b");
+game.toMove = "w";                                   // 1...e5 landed
+feed(3000, 3000, true);
+ok("white to move → WHITE ticks", game.clockRunSide === "w");
+
+// === 2. `run` changes NOTHING — every shape the venue firmware has sent ====
+// The venue's frozen top clock, in each of its guises: run=0 between presses,
+// run=1 pinned all game, a stray 2, the key omitted. The side to move ticks
+// through all of it. This is the regression gate for the whole rewrite.
+reconnect(); game.started = true; over = false; game.toMove = "b";
+feed(3000, 3000, 0);                                 // first message: resync-adopt
+ok("black to move, run=0 → BLACK TICKS (the freeze)", game.clockRunSide === "b");
+NOW += 800; feed(3000, 3000, 0);
+ok("...and on the next idle poll with run=0", game.clockRunSide === "b");
 feed(3000, 3000, false);
-ok("boolean run=false, once proven live → stopped", game.clockRunSide === null);
-
-// === 2. boolean run + last-changed beats a WRONG toMove ====================
-// White presses (white's value drops) while toMove is wrongly "w" after an
-// adoption guess. The runner must be BLACK — the venue freeze scenario.
-game.toMove = "w";                                   // wrong guess persists
-feed(2990, 3000, true);                              // white's value changed → white just pressed
-ok("white pressed + wrong toMove=w → BLACK ticks (freeze fix)", game.clockRunSide === "b");
-feed(2990, 2990, true);                              // now black presses
-ok("black pressed → white ticks", game.clockRunSide === "w");
-
-// === 3. run NAMES the side (0|1|2 firmware) — the last resort still works ==
-// Nothing else has anything to say here: a fresh connection has seen no press
-// and the turn is an adoption guess, so naming is all that is left.
-reconnect(); game.started = true; game.toMove = "w"; over = false; turnCertain = false;
-feed(3000, 3000, 2);                                 // run=2: black running, toMove wrong
-ok("run=2 names black + wrong toMove=w → BLACK ticks", game.clockRunSide === "b");
+ok("run=false → still BLACK", game.clockRunSide === "b");
 feed(3000, 3000, 1);
-ok("run=1 names white → white ticks", game.clockRunSide === "w");
-feed(3000, 3000, 0);
-ok("run=0 → stopped", game.clockRunSide === null);
-
-// === 3b. integer run=1 meaning plain "running" — the top-clock freeze =======
-// A board that has NEVER sent 2 has not proved it names sides, so a bare 1 is
-// "the clock is running", not "white". Read as "white" it pinned the tick to
-// white all game: black's clock frozen through every think, white's running
-// through them. The last-press inference must take over instead.
-reconnect(); game.started = true; game.toMove = "w"; over = false; turnCertain = true;
-feed(3000, 3000, 1);                                 // first message: resync-adopt
-feed(2990, 3000, 1);                                 // white pressed → BLACK must run
-ok("bare run=1 (never seen 2) + white pressed → BLACK ticks", game.clockRunSide === "b");
-feed(2990, 2985, 1);                                 // black pressed → white runs
-ok("bare run=1 + black pressed → white ticks", game.clockRunSide === "w");
-// ...and a board that DOES name sides still wins outright once it proves it.
-feed(2980, 2985, 2);
-ok("same connection sends 2 → board proved it names sides, BLACK ticks", game.clockRunSide === "b");
-feed(2980, 2975, 1);
-ok("after a proven 2, run=1 names WHITE again", game.clockRunSide === "w");
-
-// === 3c. one stray 2 must not poison every later 1 ========================
-// The previous fix read a single 2 as proof the board names sides, so a board
-// that sends a 2 for any other reason had every later 1 read as "white" —
-// black frozen all over again. The board's own presses now come first, and a
-// name that contradicts one is dropped for the rest of the connection.
-reconnect(); game.started = true; game.toMove = "w"; over = false; turnCertain = true;
-feed(3000, 3000, 1);                                 // resync-adopt
-feed(2990, 3000, 2);                                 // white pressed; run happens to say 2
-ok("run agrees with the press → BLACK ticks", game.clockRunSide === "b");
-feed(2990, 2980, 2);                                 // black pressed; run STILL says 2
-ok("run contradicts the press → the press wins, WHITE ticks", game.clockRunSide === "w");
-feed(2970, 2980, 1);                                 // white pressed; a poisoned 1 would say "white"
-ok("after the contradiction a bare 1 no longer names white → BLACK ticks", game.clockRunSide === "b");
-
-// === 3d. a feed that counts the running clock down between moves ==========
-// Some builds report the live value every poll instead of only at each press.
-// Then the side whose value is CHANGING is the one running, not the opposite.
-// The model flips only after three drops in a row on one clock with no move
-// between them — one-off changes must never flip it.
-reconnect(); game.started = true; over = false; turnCertain = false; game.toMove = "b";
-feed(3000, 3000, 1);                                 // resync-adopt
-feed(2999, 3000, 1);                                 // one drop on white: still read as a press
-ok("a single drop is still read as a press → BLACK ticks", game.clockRunSide === "b");
-feed(2998, 3000, 1);
-feed(2997, 3000, 1);                                 // three drops, no move between → live-ticking feed
-ok("live-ticking feed learned → the clock counting down runs (WHITE)", game.clockRunSide === "w");
-feed(2997, 2999, 1);                                 // black's clock is the one moving now
-ok("live-ticking feed → black counting down, BLACK ticks", game.clockRunSide === "b");
-
-// === 3e. the tracked turn beats naming; a guessed turn does not ===========
-reconnect(); game.started = true; over = false; turnCertain = true; game.toMove = "w";
-feed(2500, 2500, 2);                                 // no press seen yet; run names black
-ok("no press yet, turn certain → the tracked turn wins over run naming", game.clockRunSide === "w");
-turnCertain = false;                                 // the turn is now only an inherited guess
-feed(2500, 2500, 2);
-ok("no press, turn only a guess → run naming takes over (BLACK)", game.clockRunSide === "b");
-
-// === 4. both values change at once → side info discarded, toMove fallback ==
-reconnect(); game.started = true; game.toMove = "b";
-feed(2500, 2500, true);                              // resync-adopt: no change events
-feed(2400, 2400, true);                              // BOTH change (operator adjust)
-ok("both values changed → toMove fallback", game.clockRunSide === "b");
-
-// === 5. a new game (start placement) clears stale move-end info ============
+ok("run=1 (would once have named WHITE) → still BLACK", game.clockRunSide === "b");
+feed(3000, 3000, 2);
+ok("run=2 → still BLACK", game.clockRunSide === "b");
+feed(3000, 3000, "white");
+ok("run='white' → still BLACK", game.clockRunSide === "b");
+feed(3000, 3000);                                    // no `run` key at all
+ok("run key absent → still BLACK", game.clockRunSide === "b");
 game.toMove = "w";
-feed(2300, 2400, true);                              // white changed → black runs
-ok("(setup) white pressed → black ticks", game.clockRunSide === "b");
-feed(5400, 5400, false, START);                      // pieces reset: both values change too
-game.started = false;
-feed(5400, 5400, true, START);                       // clock started for the new game
-ok("new game start placement → stale press info cleared, toMove rules", game.clockRunSide === "w");
+feed(3000, 3000, 2);
+ok("white to move, run=2 (would once have named BLACK) → WHITE ticks", game.clockRunSide === "w");
+feed(3000, 3000, 0);
+ok("white to move, run=0 → WHITE ticks", game.clockRunSide === "w");
 
-// === 6. inference: a board that never asserts run ==========================
-reconnect();
-game.started = false; over = false; game.toMove = "w";
-feed(3000, 3000, false);
-ok("inference + pre-game → no tick", game.clockRunSide === null);
-game.started = true;
-feed(2990, 3000, false);                             // white pressed
-ok("inference + started + white pressed → black ticks", game.clockRunSide === "b");
+// === 3. feed value changes re-sync the clock, never pick the side =========
+reconnect(); game.started = true; over = false; game.toMove = "b";
+feed(3000, 3000, true);                              // resync-adopt
+feed(2990, 3000, true);                              // white's value drops (white pressed)
+ok("white's value changed → white re-synced to 2990", game.white.sec === 2990);
+ok("...and the side to move (black) still ticks", game.clockRunSide === "b");
+game.toMove = "w";
+feed(2990, 2980, true);                              // black's value drops
+ok("black's value changed → black re-synced", game.black.sec === 2980);
+ok("...and the side to move (white) ticks", game.clockRunSide === "w");
+feed(2990, 2979, true); feed(2990, 2978, true); feed(2990, 2977, true);   // a live-ticking feed
+ok("a clock counting down between moves does not move the tick off the side to move", game.clockRunSide === "w");
+feed(2900, 2900, true);                              // both change (operator adjust)
+ok("both values changed → adopted, side unchanged", game.white.sec === 2900 && game.black.sec === 2900 && game.clockRunSide === "w");
+
+// === 4. game over / new game =============================================
 over = true;
-feed(2990, 2990, false);
-ok("inference stops when game over", game.clockRunSide === null);
+feed(2900, 2900, true);
+ok("game over → nothing ticks", game.clockRunSide === null);
 over = false;
-
-// === 6b. run asserted only AT THE PRESS — the venue freeze =================
-// The board reports run=1 on the press message and 0 on the polls in between.
-// Obeyed literally that means "both clocks stopped" for the whole of every
-// think: the thinking player's clock stands still all game. Three goes at the
-// WHICH-side logic could not touch this, because the gate had already decided
-// nothing was running at all. The zeros of a run flag that has never been seen
-// up on an idle poll carry no authority.
-reconnect();
-game.started = true; over = false; game.toMove = "w"; turnCertain = false;
-feed(3000, 3000, 0);                                 // before any press
-ok("press-artifact run: pre-press poll → the turn", game.clockRunSide === "w");
-feed(2990, 3000, 1);                                 // WHITE PRESSES: value moved, run up
-ok("press-artifact run: the press → BLACK ticks", game.clockRunSide === "b");
-NOW += 800; feed(2990, 3000, 0);                     // black thinks; run back down
-ok("press-artifact run: black still thinking → BLACK STILL TICKS", game.clockRunSide === "b");
-NOW += 800; feed(2990, 3000, 0);
-ok("...and it does not stop on the next poll either", game.clockRunSide === "b");
-NOW += 800; feed(2990, 2985, 1);                     // black presses back
-ok("press-artifact run: black pressed → white ticks", game.clockRunSide === "w");
-
-// === 6c. an ABSENT run key is silence, not "stopped" =======================
-// `!!undefined` is false, so a feed that merely omits the key on the odd poll
-// used to freeze the display on exactly those polls.
-reconnect();
-game.started = true; over = false; game.toMove = "w"; turnCertain = false;
-feed(3000, 3000, true); feed(3000, 3000, true);      // proven live on the idle repeat
-ok("(setup) run proven live → white ticks", game.clockRunSide === "w");
-sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
-  serialnr: "3000150100", state: "ACTIVE", board: MID,
-  clock: { white: hms(3000), black: hms(3000) } }] }) });   // no `run` key at all
-ok("run key absent → the feed said nothing, clock keeps running", game.clockRunSide === "w");
+game.started = false; game.toMove = "w";             // pieces reset: moves.js clears started
+feed(5400, 5400, true, START);
+ok("new game, no move yet → nothing ticks", game.clockRunSide === null);
+game.started = true; game.toMove = "b";
+feed(5400, 5400, true);
+ok("first move of the new game → black ticks", game.clockRunSide === "b");
 
 // === 7. flagfall: feed-authoritative, once, re-arms ========================
 reconnect(); game.started = true; game.toMove = "w";
@@ -272,9 +184,9 @@ NOW += 1000; tick();
 ok("resume counts from the held value", game.black.sec === 197);
 
 // === 9. LiveChess has LOST the board: INACTIVE stand-in must not be read ===
-reconnect(); game.started = true; game.toMove = "w"; over = false;
+reconnect(); game.started = true; game.toMove = "b"; over = false;
 feed(3000, 3000, true);                              // resync-adopt on the fresh socket
-feed(2990, 3000, true);                              // white pressed → black ticking
+feed(2990, 3000, true);
 ok("(setup) black ticking, board online", game.clockRunSide === "b" && game.boardOnline === true);
 const appliedBefore = applied, gapsBefore = gaps;
 const wBefore = game.white.sec, bBefore = game.black.sec;
@@ -295,10 +207,11 @@ ok("LiveChess answering INACTIVE is not 'silence' (no recycle)", LiveChess.diag.
 feed(2500, 2600, true, "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR");
 ok("back ACTIVE → move engine told a gap happened (board picked up at once)", gaps === gapsBefore + 1 && applied === appliedBefore + 1);
 ok("back ACTIVE → clocks re-read verbatim from the feed", game.white.sec === 2500 && game.black.sec === 2600 && game.boardOnline === true);
+ok("back ACTIVE → the side to move ticks again", game.clockRunSide === "b");
 ok("offline-since cleared", LiveChess.diag.boardOfflineSince === null);
 
 // === 10. a live board with no clock data → nothing ticks =================
-feed(2490, 2600, true);                              // white pressed → black ticks
+feed(2490, 2600, true);
 ok("(setup) black ticking", game.clockRunSide === "b");
 sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
   serialnr: "3000150100", state: "ACTIVE", board: MID, clock: null }] }) });
@@ -335,7 +248,7 @@ ok("...but genuine silence after it still recycles", LiveChess.diag.silentRecycl
 // connected, playing board INACTIVE (no session open in its UI), gating on the
 // state alone would discard the whole feed and the overlay would show nothing
 // for an entire meet. The venue stand-in is sourceless; a real board is not.
-reconnect(); game.started = true; over = false; turnCertain = true; game.toMove = "w";
+reconnect(); game.started = true; over = false; game.toMove = "w";
 feed(3000, 3000, true);                              // a normal ACTIVE message first
 const appliedA = applied;
 sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{

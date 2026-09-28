@@ -171,22 +171,22 @@ it.** Three fixes for a frozen top clock went into the served overlay
 fixing a file that is not the one being loaded. The legacy file still carried
 the original defect (`CLOCK_RUN_SIDE = b.clock.run ? STATE.toMove : null`,
 which pins the tick to a guessed side after any mid-game adoption), so it now
-uses the same press-derived resolution and wall-anchored countdown as the
-served system. Regression suite: `node tools/legacy-clock-selftest.js .`
+uses the same rule and wall-anchored countdown as the served system.
+Regression suite: `node tools/legacy-clock-selftest.js .`
 
-**The `run` flag decides whether a clock is running only once it has earned
-it.** Both overlays used to obey `clock.run` absolutely as soon as a board
-asserted it even once. Boards that flick `run` up at the press and report `0`
-on the polls in between then read as "both clocks stopped" for the whole of
-every think — the thinking player's clock stands still all game. An omitted
-`run` key was read the same way, because `!!undefined` is false. So a *stop* is
-now believed only after the feed has proven `run` is a live flag by asserting
-it on an **idle poll** (no clock change, no new placement — i.e. between
-presses, where a real flag is still up and a press-instant artifact has already
-dropped back); until then, and whenever the key is absent, whether a clock runs
-is inferred from game state. Admin → Board → **Clock feed** says which gate is
-in force. Trade-off: on a board that never proves its flag, a genuine mid-game
-*pause* keeps counting down on screen until play resumes.
+**The clock is a timer: the side to move counts down while the game is under
+way.** Nothing in the LiveChess feed decides which clock ticks or whether one
+does. Five fixes tried to read that out of the feed — `clock.run` as a boolean
+gate, `run` as a side name (1/2), which value changed last, whether the feed
+ticks between moves — and the black clock kept freezing at the venue, because
+every one of those signals differs by firmware and any misreading pins the tick
+to one side for a whole game. So now: before the first move nothing ticks;
+after it, the side to move's clock counts down (wall-anchored, so a throttled
+OBS tab loses no time) and re-syncs to the feed's value whenever the feed
+changes it; after checkmate/stalemate nothing ticks. `run` is shown on
+Admin → Board → **Clock feed** for information and is otherwise ignored.
+Trade-off, accepted: a genuine mid-game *pause* (clock stopped for a dispute)
+keeps counting down on screen until play resumes.
 
 **Which overlay is on air?** The server only ever serves `public/display.html`,
 so the legacy file can only reach OBS as a **Local file** source. Opened that
