@@ -23,7 +23,13 @@
     10. clock: null on a live board → nothing ticks.
     11. A socket stuck CONNECTING is abandoned after its deadline.
     12. Time the PAGE was asleep is never counted as feed silence.
-    13. An INACTIVE board that HAS a source is a real board. */
+    13. An INACTIVE board that HAS a source is a real board.
+    14. The RabbitConnect feed (tools/rabbit-feed.js) says which clock it SEES
+        ticking (`ticking`). That is the real clock and it is obeyed outright —
+        over the side to move, before the first move, through a pause. A flip
+        of the tick re-reads the newly running side from the feed, so a clock
+        this display had been counting down by mistake is put right at the
+        press. Without the field (LiveChess) rules 1–4 stand unchanged. */
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -261,6 +267,50 @@ sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
   serialnr: "3000150100", source: null, state: "INACTIVE", battery: null,
   board: START, flipped: false, clock: null }] }) });
 ok("a SOURCELESS INACTIVE is the stand-in → offline, nothing applied", game.boardOnline === false && applied === appliedA + 1);
+
+// === 14. the feed SEES which clock ticks (the RabbitConnect feed) ==========
+// tools/rabbit-feed.js reads the clock digits off RabbitConnect's window and
+// says which are going down. That is the real clock: obeyed over the move
+// engine's side to move, which drifts after an adopted position and had the
+// tick on the wrong player at the 24 Oct 2026 meet.
+function feedT(white, black, ticking, placement) {
+  sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
+    serialnr: "3000150100", source: "RabbitConnect", state: "ACTIVE", board: placement || MID,
+    clock: { white: hms(white), black: hms(black), ticking } }] }) });
+}
+reconnect(); game.started = true; over = false; game.toMove = "b";
+feedT(3000, 3000, "w");                              // resync-adopt on the fresh socket
+ok("engine says black to move, feed sees WHITE ticking → WHITE ticks", game.clockRunSide === "w" && LiveChess.diag.clock.from === "the feed sees that clock ticking");
+game.white.sec = 2950;                               // the local countdown has run on
+feedT(3000, 3000, "w");
+ok("same side, same values → the running clock is NOT reset by the poll", game.white.sec === 2950 && game.clockRunSide === "w");
+feedT(2948, 3000, "b");                              // the press: white stops at 2948, black starts
+ok("press → the tick moves to BLACK", game.clockRunSide === "b");
+ok("…white re-synced to its move-end value", game.white.sec === 2948);
+ok("…black starts from its stopped value", game.black.sec === 3000);
+game.white.sec = 2800;                               // this display had counted WHITE down by mistake meanwhile
+feedT(2948, 2990, "w");                              // black presses: black stops at 2990, white starts
+ok("flip to WHITE → white restored to the feed's exact stopped value (the drift is undone at the press)", game.clockRunSide === "w" && game.white.sec === 2948);
+ok("…and black re-synced to its move-end value", game.black.sec === 2990);
+game.white.sec = 2940;                               // ticking on
+feedT(2948, 2990, null);                             // the clock is paused
+ok("feed sees neither clock ticking (a pause) → nothing ticks, values held", game.clockRunSide === null && game.white.sec === 2940 && LiveChess.diag.clock.from === "the feed sees neither clock ticking");
+feedT(2940, 2990, "w");                              // the feed reports where it stopped, then play resumes
+ok("resume → white ticks again from the paused value", game.clockRunSide === "w" && game.white.sec === 2940);
+game.started = false; game.toMove = "w";             // a new game, pieces reset
+feedT(5400, 5400, null, START);
+ok("clocks set, not started → nothing ticks", game.clockRunSide === null);
+feedT(5400, 5400, "w", START);
+ok("the clock started before the first move → WHITE ticks (the real clock is running)", game.clockRunSide === "w");
+game.started = true; over = true;
+feedT(5400, 5390, "b");
+ok("game over on the board but black's clock still running → it ticks", game.clockRunSide === "b");
+over = false;
+feedT(5400, 5390, "white");
+ok("an unknown ticking value → nothing ticks (no guessing)", game.clockRunSide === null && LiveChess.diag.clock.ticking === "white");
+game.toMove = "b";
+feed(5400, 5390, true);                              // LiveChess: no `ticking` field
+ok("no `ticking` field (LiveChess) → the side to move ticks, as before", game.clockRunSide === "b" && LiveChess.diag.clock.from === "the side to move" && LiveChess.diag.clock.ticking === undefined);
 
 console.log("\n" + (failed ? "FAILURES: " + failed : "all clock scenarios passing") + "  (" + passed + " passed)");
 process.exit(failed ? 1 : 0);

@@ -108,7 +108,8 @@ SCC.livechess = (function () {
 
   /* ---- the e-Board going missing INSIDE LiveChess (Sept 2026 meet) -------
      LiveChess keeps answering eboards after it has lost the board itself
-     (Bluetooth dropped, board powered off, RabbitConnect gone): the entry
+     (board powered off or unplugged, or another program — RabbitConnect —
+     holding its one serial port, which shuts LiveChess out): the entry
      comes back state INACTIVE (or NOTRESPONDING), source null, clock null,
      and a STAND-IN placement — the start position. That is not a reading of
      the table. The old code fed it to the move engine like any other
@@ -380,16 +381,45 @@ SCC.livechess = (function () {
         // also the only place flagfall is judged — see noteFeedClock.
         if (b.clock.white !== LC_LAST_W) { LC_LAST_W = b.clock.white; const s = SCC.clock.lcClockSec(b.clock.white); if (s != null) { game.white.sec = s; SCC.moves.syncClock("w", s); noteFeedClock("w", s); } }
         if (b.clock.black !== LC_LAST_B) { LC_LAST_B = b.clock.black; const s = SCC.clock.lcClockSec(b.clock.black); if (s != null) { game.black.sec = s; SCC.moves.syncClock("b", s); noteFeedClock("b", s); } }
-        // The side to move ticks while the game is under way — see the note
-        // above. `run` is shown to the operator, not obeyed.
         const st = SCC.moves.gameStatus();
-        game.clockRunSide = (game.started && !st.over) ? game.toMove : null;
+        /* Which side ticks. Two sources, in this order:
+           1. OBSERVED — the feed carries `ticking`: which clock's DIGITS are
+              going down, as tools/rabbit-feed.js reads them off RabbitConnect's
+              clock window every few hundred ms. That is the real clock, so it
+              is obeyed outright, null included: it runs before the first move
+              if the players started it, holds through a pause, and a press
+              moves the tick whatever the move engine believes — its side to
+              move drifts after an adopted position, which is how the tick
+              ended up on the wrong player at the 24 Oct 2026 meet. This is
+              NOT LiveChess's `run` flag (see the note above); that stays
+              ignored.
+           2. INFERRED — no `ticking` field (LiveChess itself): the side to
+              move ticks while the game is under way, exactly as before. */
+        const observed = typeof b.clock === "object" && "ticking" in b.clock;
+        const side = observed
+          ? (b.clock.ticking === "w" || b.clock.ticking === "b" ? b.clock.ticking : null)
+          : (game.started && !st.over) ? game.toMove : null;
+        // A side that STARTS ticking starts from the feed's value for it, which
+        // is exact: a stopped clock does not move, and the feed reports where it
+        // stopped. If this display had been counting that clock down by mistake
+        // (the tick on the wrong side), this is the moment it is put right —
+        // the press reconciles both clocks. The side that just STOPPED is left
+        // to the change-detection above: its move-end value arrives as a change
+        // and re-syncs it then, so it never jumps back up to its turn's start.
+        if (side && side !== game.clockRunSide) {
+          const obj = side === "w" ? game.white : game.black;
+          const fv = SCC.clock.lcClockSec(side === "w" ? b.clock.white : b.clock.black);
+          if (fv != null && fv !== obj.sec) obj.sec = fv;
+        }
+        game.clockRunSide = side;
         diag.clock = {
           w: b.clock.white, b: b.clock.black,
           run: b.clock.run === undefined ? null : b.clock.run,
           run_type: typeof b.clock.run,
+          ticking: observed ? (b.clock.ticking == null ? null : String(b.clock.ticking)) : undefined,
           side: game.clockRunSide,
-          from: !game.started ? "the game has not started"
+          from: observed ? (side ? "the feed sees that clock ticking" : "the feed sees neither clock ticking")
+            : !game.started ? "the game has not started"
             : st.over ? "the game is over"
             : "the side to move",
         };
