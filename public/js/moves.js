@@ -192,6 +192,8 @@ SCC.moves = (function () {
     gaps: 0,                    // times the board was adopted with moves UNRECOVERABLE
     gapAdopts: 0,               // boards picked up straight after a feed gap
     restored: 0,                // move lists restored from a display reload
+    turnFixes: 0,               // uncertain turn corrected by the clock the feed sees ticking
+    turnDisputes: 0,            // clock seen ticking for the side NOT to move while the turn is certain
     enginePlacement: "",
     boardPlacement: "",
   };
@@ -409,6 +411,34 @@ SCC.moves = (function () {
     if (!keepMoves) { game.moves = []; game.currentPly = -1; clearTimes(); }
     else { game.currentPly = game.moves.length - 1; }
     pushState();
+    return true;
+  }
+
+  /* The clock the feed can SEE ticking (tools/rabbit-feed.js → clock.ticking,
+     "w" or "b"; livechess.js never calls this for null or when the field is
+     absent). A running clock belongs to the side to move, so it is the one
+     signal that settles an adopted position's guessed turn without waiting for
+     a move — and without it the wrong "X to move" stayed on air and every later
+     move went through the retry path. UNCERTAIN turn, clock disagrees: rebuild
+     the same placement with the other side to move (exactly what the retry
+     does), now certain. CERTAIN turn, clock disagrees: the engine has seen a
+     real move and keeps its turn; the disagreement is only counted for admin
+     (a player who forgot to press, or the clock started on the wrong side).
+     A side that cannot be to move (the other king standing in check) is never
+     adopted, the same rule legalTurn applies. */
+  function noteClockSide(side) {
+    if (!GAME || (side !== "w" && side !== "b")) return false;
+    if (side === GAME.turn()) return false;
+    if (!turnUncertain) { diag.turnDisputes++; return false; }
+    const placement = placementOf(GAME.fen());
+    if (legalTurn(placement, side) !== side) { diag.turnDisputes++; return false; }
+    const c = buildChess(placement, side);
+    if (!c) return false;
+    GAME = c;
+    turnUncertain = false;                                    // the clock told us whose move
+    diag.turnFixes++;
+    pushState();                                              // game.toMove corrected on air
+    saveSnapshot();                                           // a reload inherits the corrected turn
     return true;
   }
 
@@ -919,7 +949,7 @@ SCC.moves = (function () {
 
   return {
     init, applyPlacement, reset, renderList, gameStatus, syncClock, obsTime,
-    configure, forceResync, restartFromBoard, noteFeedGap, restoreLastKnown, diag,
+    configure, forceResync, restartFromBoard, noteFeedGap, noteClockSide, restoreLastKnown, diag,
     START_PLACEMENT, placementOf,
   };
 })();

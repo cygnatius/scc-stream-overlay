@@ -221,6 +221,23 @@ Admin → Board → **Clock feed** shows "feed sees white/black/neither ticking"
 when the field is in use. Regression suites: `node tools/clock-selftest.js .`
 and `node tools/rabbit-selftest.js`.
 
+**The running clock also settles whose move it is.** The move engine's side to
+move is only a guess after it has adopted a position, and a wrong guess shows
+the wrong "X to move" on air and sends every later move through its
+other-side retry. With the RabbitConnect feed, livechess.js hands the clock it
+sees ticking (`"w"`/`"b"`, never null, never without the field) to the move
+engine (`SCC.moves.noteClockSide`): while the turn is uncertain and the clock
+disagrees, the engine rebuilds the same position with that side to move and
+treats the turn as known, so the indicator corrects itself at the next clock
+press instead of waiting for a move. Once a real move has fixed the turn the
+clock cannot override it — a player who forgot to press is not a reason to
+rewrite the game — the disagreement is only counted, and a side that cannot
+be to move (the other king in check) is refused. Admin → Board → **Recoveries
+this session** shows "side-to-move corrected from the clock" and "clock running
+for the side not to move" when either has happened. Regression scenarios:
+`node tools/engine-selftest.js .` (clock seen ticking corrects a guessed side
+to move) and `node tools/clock-selftest.js .` (section 15).
+
 **Which overlay is on air?** The server only ever serves `public/display.html`,
 so the legacy file can only reach OBS as a **Local file** source. Opened that
 way it now announces itself for six seconds at load with a red
