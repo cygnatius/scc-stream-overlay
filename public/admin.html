@@ -1142,7 +1142,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       </div>
       <p class="hint" style="margin-top:10px">
         Display status: <b>{{ pmStatusLabel }}</b><br>
-        The token needs a plain READ grant on the association (facet left blank) — a narrowed grant makes the overlay look broken on air. Token is a credential: it is masked here, never logged, and <code>config/*.json</code> is gitignored.
+        The token must be an <b>association</b> token, minted on the Pairingsman server (Forge → Run Command) with <code>php artisan api:association-token "Shepparton Chess Club"</code>; it reads that association and everything beneath it.
+        A personal token from <code>php artisan api:token</code> works everywhere else in the API but is answered 404 here, so every entity looks "not found" — the status above says so when that is the case. Token is a credential: it is masked here, never logged, and <code>config/*.json</code> is gitignored.
       </p>
       <div class="savebar">
         <span class="dirty" v-if="dirty.pm">Unsaved changes</span>
@@ -1159,7 +1160,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       <div class="btns" style="margin-bottom:12px">
         <button class="ghost" @click="fetchPmPreview">Fetch preview</button>
         <span class="hint" style="align-self:center" v-if="pmPreview">
-          {{ {loading:'fetching…', ok:'payload received', unconfigured:'not configured yet', notfound:'not found or not visible to this token', denied:'token rejected', unreachable:'unreachable (offline, wrong URL, or CORS not allowed yet)', error:'server error'}[pmPreview.status] }}
+          {{ {loading:'fetching…', ok:'payload received', unconfigured:'not configured yet', notfound:'not found or not visible to this token', usertoken:'wrong kind of token — a personal token; the broadcast API needs an association token (php artisan api:association-token)', denied:'token rejected', unreachable:'unreachable (offline, wrong URL, or CORS not allowed yet)', error:'server error'}[pmPreview.status] }}
         </span>
       </div>
       <table class="ttable">
@@ -2434,7 +2435,14 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         headers: { Authorization: "Bearer " + p.token, Accept: "application/json" },
         cache: "no-store",
       });
-      if (r.status === 404) { state.pmPreview = { status: "notfound" }; return; }
+      if (r.status === 404) {
+        // A personal token (api:token) is answered 404 on the broadcast routes,
+        // which take only an association token — tell that apart from a wrong
+        // id the same way the display does: a user token can read /api/user.
+        let user = false;
+        try { user = (await fetch(base + "/api/user", { headers: { Authorization: "Bearer " + p.token, Accept: "application/json" }, cache: "no-store" })).status === 200; } catch (e) { }
+        state.pmPreview = { status: user ? "usertoken" : "notfound" }; return;
+      }
       if (r.status === 401 || r.status === 403) { state.pmPreview = { status: "denied" }; return; }
       if (!r.ok) { state.pmPreview = { status: "error" }; return; }
       const j = await r.json();
@@ -2578,6 +2586,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
           live: "live — " + p.entity + (age != null ? ", refreshed " + age + "s ago" : ""),
           stale: "refresh failing — last good data held on screen" + (age != null ? " (from " + age + "s ago)" : ""),
           notfound: "not found or not visible to this token — check the entity id and the token's grant",
+          usertoken: "WRONG KIND OF TOKEN — this is a personal token (api:token), and the broadcast API accepts only an association token. On the Pairingsman server run  php artisan api:association-token \"Shepparton Chess Club\"  and paste the result above",
           denied: "token rejected (revoked or wrong token) — display holds last good data",
         })[p.status] || p.status;
       });

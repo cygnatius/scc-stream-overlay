@@ -90,7 +90,8 @@ operating the admin page: **SCC-Overlay-Manual-Setup.md**.
   whose requests have all hung for two minutes reloads itself.
   Regression suites: `node tools/engine-selftest.js .`,
   `node tools/clock-selftest.js .`, `node tools/pgn-selftest.js .`,
-  `node tools/legacy-clock-selftest.js .`, `node tools/rabbit-selftest.js`
+  `node tools/legacy-clock-selftest.js .`, `node tools/rabbit-selftest.js`,
+  `node tools/pairingsman-selftest.js .`
 
 ## Commentary ticker
 
@@ -105,6 +106,11 @@ and an optional standing label are all configurable.
 - **Players / event** — typed in admin (roster with photos supported), or
   auto-filled from the Pairingsman broadcast API (read-only; configured on
   the admin Pairingsman tab, every field switchable auto / manual / hidden).
+  **The token must be an association token** — minted on the Pairingsman
+  server with `php artisan api:association-token "Shepparton Chess Club"`.
+  A personal token (`php artisan api:token`) works on the rest of the API but
+  the broadcast routes answer it 404, so every entity reads "not found"; the
+  overlay now probes for that case and admin says "wrong kind of token".
   The overlay is fully operable with Pairingsman absent — auto degrades to
   the manual values whenever the payload is null or unreachable.
 
