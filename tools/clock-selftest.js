@@ -29,7 +29,11 @@
         over the side to move, before the first move, through a pause. A flip
         of the tick re-reads the newly running side from the feed, so a clock
         this display had been counting down by mistake is put right at the
-        press. Without the field (LiveChess) rules 1–4 stand unchanged. */
+        press. Without the field (LiveChess) rules 1–4 stand unchanged.
+    15. A ticking side of "w"/"b" is also handed to the move engine
+        (SCC.moves.noteClockSide) so a guessed side to move corrects itself at
+        the press; null, an unknown value and the LiveChess feed (no field)
+        never reach it. */
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -48,7 +52,9 @@ const game = { toMove: "w", started: false, moves: [], white: { sec: null }, bla
   clockRunSide: null, flagfall: null, lcConnected: false, rawPlacement: null, demo: false };
 let over = false;
 let applied = 0, gaps = 0;                            // calls into the move engine
+const clockSides = [];                                // every side handed to noteClockSide
 const movesStub = { applyPlacement() { applied++; }, syncClock() {}, noteFeedGap() { gaps++; }, reset() {},
+  noteClockSide(side) { clockSides.push(side); },
   START_PLACEMENT: START,
   gameStatus() { return { tracking: true, over, turn_certain: true }; } };
 
@@ -311,6 +317,29 @@ ok("an unknown ticking value → nothing ticks (no guessing)", game.clockRunSide
 game.toMove = "b";
 feed(5400, 5390, true);                              // LiveChess: no `ticking` field
 ok("no `ticking` field (LiveChess) → the side to move ticks, as before", game.clockRunSide === "b" && LiveChess.diag.clock.from === "the side to move" && LiveChess.diag.clock.ticking === undefined);
+
+// === 15. the ticking side reaches the move engine, nothing else does ======
+// The engine's side to move is a guess after an adopted position; the clock
+// the feed sees running is what settles it (moves.js noteClockSide). Only a
+// real side is handed over: a pause (null), an unknown value and the plain
+// LiveChess feed (no field at all) must never call it.
+reconnect(); game.started = true; over = false; game.toMove = "w";
+clockSides.length = 0;
+feedT(3000, 3000, "b");
+ok("feed sees BLACK ticking → move engine told 'b'", clockSides.length === 1 && clockSides[0] === "b");
+feedT(2990, 3000, "w");
+ok("press, WHITE ticking → move engine told 'w'", clockSides.length === 2 && clockSides[1] === "w");
+feedT(2990, 3000, null);
+ok("a pause (null) → the move engine is NOT called", clockSides.length === 2);
+feedT(2990, 3000, "white");
+ok("an unknown value → the move engine is NOT called", clockSides.length === 2);
+sock.onmessage({ data: JSON.stringify({ response: "call", id: 1, param: [{
+  serialnr: "3000150100", state: "ACTIVE", board: MID, clock: null }] }) });
+ok("clock: null → the move engine is NOT called", clockSides.length === 2);
+feed(2990, 3000, true);
+ok("no ticking field (LiveChess) → the move engine is NOT called", clockSides.length === 2);
+feedT(2990, 3000, "w");
+ok("...and a real side is handed over again (every poll, so the engine sees it as soon as it has a board)", clockSides.length === 3 && clockSides[2] === "w");
 
 console.log("\n" + (failed ? "FAILURES: " + failed : "all clock scenarios passing") + "  (" + passed + " passed)");
 process.exit(failed ? 1 : 0);

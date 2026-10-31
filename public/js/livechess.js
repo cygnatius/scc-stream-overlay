@@ -381,7 +381,6 @@ SCC.livechess = (function () {
         // also the only place flagfall is judged — see noteFeedClock.
         if (b.clock.white !== LC_LAST_W) { LC_LAST_W = b.clock.white; const s = SCC.clock.lcClockSec(b.clock.white); if (s != null) { game.white.sec = s; SCC.moves.syncClock("w", s); noteFeedClock("w", s); } }
         if (b.clock.black !== LC_LAST_B) { LC_LAST_B = b.clock.black; const s = SCC.clock.lcClockSec(b.clock.black); if (s != null) { game.black.sec = s; SCC.moves.syncClock("b", s); noteFeedClock("b", s); } }
-        const st = SCC.moves.gameStatus();
         /* Which side ticks. Two sources, in this order:
            1. OBSERVED — the feed carries `ticking`: which clock's DIGITS are
               going down, as tools/rabbit-feed.js reads them off RabbitConnect's
@@ -396,6 +395,14 @@ SCC.livechess = (function () {
            2. INFERRED — no `ticking` field (LiveChess itself): the side to
               move ticks while the game is under way, exactly as before. */
         const observed = typeof b.clock === "object" && "ticking" in b.clock;
+        // The clock the feed SEES running also settles the move engine's side to
+        // move when that is only a guess (an adopted position): the "X to move"
+        // indicator corrects itself at the press instead of waiting for a move.
+        // Never for null (paused / not started) and never without the field.
+        if (observed && (b.clock.ticking === "w" || b.clock.ticking === "b") && SCC.moves.noteClockSide) {
+          SCC.moves.noteClockSide(b.clock.ticking);
+        }
+        const st = SCC.moves.gameStatus();
         const side = observed
           ? (b.clock.ticking === "w" || b.clock.ticking === "b" ? b.clock.ticking : null)
           : (game.started && !st.over) ? game.toMove : null;

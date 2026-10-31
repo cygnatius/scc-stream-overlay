@@ -391,6 +391,8 @@ SCC.scenes = (function () {
             board_placement: SCC.moves.diag.boardPlacement,
             gap_adopts: SCC.moves.diag.gapAdopts,
             restored: SCC.moves.diag.restored,
+            turn_fixes: SCC.moves.diag.turnFixes,
+            turn_disputes: SCC.moves.diag.turnDisputes,
           } : null,
           // Feed health: a socket can stay "open" while LiveChess has gone
           // quiet, so the age of the last board message is what matters.
