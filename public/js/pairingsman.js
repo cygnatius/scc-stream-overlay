@@ -25,6 +25,14 @@
    - Cache the last successful payload. A failed refresh keeps last good
      data on screen and sets an internal flag. 404 → "not found or not
      visible to this token" in admin, silent degradation on stream.
+   - THE WRONG KIND OF TOKEN (24 Oct 2026 meet). The broadcast routes take
+     only an ASSOCIATION-owned token (`php artisan api:association-token`)
+     and answer 404 — never 401/403 — to a personal user token
+     (`php artisan api:token`), which works on every other API route. With a
+     user token configured, every entity reads "not found" and the operator
+     is sent chasing ids and grants. A user token is recognisable: it can
+     read {base}/api/user. So a 404 is followed by that one probe, and the
+     status says `usertoken` — "wrong kind of token" — when it answers 200.
    - Timestamps carry +10:00/+11:00 offsets — display the WALL TIME as
      written (never convert through the machine timezone).
    - Every key always present, absent = null. null → manual value → hidden.
@@ -45,7 +53,7 @@ SCC.pairingsman = (function () {
   let cfg = null;                        // SCC.config.store
 
   const state = Vue.reactive({
-    status: "off",                       // off | loading | live | stale | notfound | denied
+    status: "off",                       // off | loading | live | stale | notfound | denied | usertoken
     fetchedAt: 0,
     entity: "",                          // "meeting 12" — admin display
     rev: 0,                              // bumped when adapted data changes
@@ -131,6 +139,20 @@ SCC.pairingsman = (function () {
     return `${base}/api/v1/broadcast/${type}/${encodeURIComponent(id)}`;
   }
 
+  // Does this token read the USER identity route? Then it is a personal
+  // token, which the broadcast API refuses with 404 (see the rules above).
+  // One request, only after a 404, so the refresh loop costs at most two.
+  async function isUserToken(pc) {
+    const base = String(pc.base_url || "").trim().replace(/\/+$/, "");
+    try {
+      const r = await fetch(base + "/api/user", {
+        headers: { Authorization: "Bearer " + pc.token, Accept: "application/json" },
+        cache: "no-store",
+      });
+      return r.status === 200;
+    } catch (e) { return false; }
+  }
+
   async function fetchOnce() {
     const pc = pmCfg();
     const url = endpoint(pc);
@@ -141,9 +163,10 @@ SCC.pairingsman = (function () {
         headers: { Authorization: "Bearer " + pc.token, Accept: "application/json" },
         cache: "no-store",
       });
-      if (r.status === 404) {            // inaccessible or wrong-association id — per contract
-        if (!adapted) state.status = "notfound";
-        else if (state.status !== "notfound") { state.status = "notfound"; }   // held data stays
+      if (r.status === 404) {            // inaccessible or wrong-association id — per contract…
+        // …or a personal token on routes that take only an association token.
+        // Held data stays either way.
+        state.status = (await isUserToken(pc)) ? "usertoken" : "notfound";
         return;
       }
       if (r.status === 401 || r.status === 403) {

@@ -64,14 +64,32 @@ operating the admin page: **SCC-Overlay-Manual-Setup.md**.
   clocks are re-read from the feed, and the board is picked back up on the first
   message even when the moves played in between can't be reconstructed. A
   display reload restores the move list from the position on the board.
-  **LiveChess losing the board itself** (Bluetooth / RabbitConnect dropped,
-  board switched off) is different from a dropout: LiveChess keeps answering,
+  **LiveChess losing the board itself** (board switched off or unplugged, or
+  another program holding its port) is different from a dropout: LiveChess keeps answering,
   but reports the board `INACTIVE` with a stand-in start position and no
   clock. The overlay treats that as *board offline* — the last real position,
   move list and clock values hold, the clocks stop counting, a second dim dot
   appears bottom-left, and Admin → Board says "LiveChess has LOST the e-Board".
   Resync / New game can't help there (they adopt the last position LiveChess
   delivered); get the board back and the overlay picks it up at once.
+  **RabbitConnect and LiveChess cannot both have the board.** It has one
+  serial port (COM4 on the venue PC) and one program holds it at a time —
+  whichever opened it first. With RabbitConnect open, LiveChess reports the
+  board `INACTIVE` for as long as RabbitConnect runs. Two ways to work:
+  close RabbitConnect and restart LiveChess (board, moves *and* clocks reach
+  the overlay); or keep RabbitConnect on stream and run the
+  **RabbitConnect board feed** — `start-rabbit-feed.bat`, which
+  `start-overlay.bat` also launches. It reads the diagram RabbitConnect draws
+  (a passive picture of its window: no input sent, port untouched, works while
+  the window is covered, not while it is minimized) and serves the position on
+  `127.0.0.1:1983`; set Admin → Board → manual host override to that. The
+  **clocks** come from RabbitConnect's driver window ("DGT RabbitPlugin"),
+  which keeps both times up to date whether or not it is showing; they are
+  handed to the overlay the way LiveChess would (a value at each move-end, the
+  overlay counting down in between). It reads the diagram as drawn — a8
+  top-left, so the top clock is Black's — and reports the board offline rather
+  than guess when it cannot read every square.
+  `http://127.0.0.1:1983/_state` shows what it sees, clocks included.
   **Which page is on air:** admin bases its status on the display running
   *inside OBS*. A preview tab in an ordinary browser is throttled when hidden
   and is not the stream — if only such a tab is reporting, admin shows a red
@@ -80,7 +98,8 @@ operating the admin page: **SCC-Overlay-Manual-Setup.md**.
   whose requests have all hung for two minutes reloads itself.
   Regression suites: `node tools/engine-selftest.js .`,
   `node tools/clock-selftest.js .`, `node tools/pgn-selftest.js .`,
-  `node tools/legacy-clock-selftest.js .`
+  `node tools/legacy-clock-selftest.js .`, `node tools/rabbit-selftest.js`,
+  `node tools/pairingsman-selftest.js .`
 
 ## Commentary ticker
 
@@ -95,6 +114,11 @@ and an optional standing label are all configurable.
 - **Players / event** — typed in admin (roster with photos supported), or
   auto-filled from the Pairingsman broadcast API (read-only; configured on
   the admin Pairingsman tab, every field switchable auto / manual / hidden).
+  **The token must be an association token** — minted on the Pairingsman
+  server with `php artisan api:association-token "Shepparton Chess Club"`.
+  A personal token (`php artisan api:token`) works on the rest of the API but
+  the broadcast routes answer it 404, so every entity reads "not found"; the
+  overlay now probes for that case and admin says "wrong kind of token".
   The overlay is fully operable with Pairingsman absent — auto degrades to
   the manual values whenever the payload is null or unreachable.
 
@@ -195,6 +219,38 @@ changes it; after checkmate/stalemate nothing ticks. `run` is shown on
 Admin → Board → **Clock feed** for information and is otherwise ignored.
 Trade-off, accepted: a genuine mid-game *pause* (clock stopped for a dispute)
 keeps counting down on screen until play resumes.
+
+**With the RabbitConnect feed the real clock decides.** The side to move is a
+guess whenever the move engine has had to adopt a position (a missed move, a
+hand in flight, a reload), and at the 24 Oct 2026 meet that guess had the tick
+on the wrong player. `tools/rabbit-feed.js` can see which clock's digits are
+going down in RabbitConnect's clock window, and passes that on as
+`clock.ticking` (`"w"`, `"b"` or `null`). When the field is present the
+display obeys it outright: a press moves the tick, the clock started before the
+first move ticks, a pause holds, and a clock this display had been counting
+down by mistake is set back to the feed's exact stopped value the moment it
+starts for real. This is not LiveChess's `run` flag — that is still ignored —
+and without the field (LiveChess itself) the side-to-move rule above stands.
+Admin → Board → **Clock feed** shows "feed sees white/black/neither ticking"
+when the field is in use. Regression suites: `node tools/clock-selftest.js .`
+and `node tools/rabbit-selftest.js`.
+
+**The running clock also settles whose move it is.** The move engine's side to
+move is only a guess after it has adopted a position, and a wrong guess shows
+the wrong "X to move" on air and sends every later move through its
+other-side retry. With the RabbitConnect feed, livechess.js hands the clock it
+sees ticking (`"w"`/`"b"`, never null, never without the field) to the move
+engine (`SCC.moves.noteClockSide`): while the turn is uncertain and the clock
+disagrees, the engine rebuilds the same position with that side to move and
+treats the turn as known, so the indicator corrects itself at the next clock
+press instead of waiting for a move. Once a real move has fixed the turn the
+clock cannot override it — a player who forgot to press is not a reason to
+rewrite the game — the disagreement is only counted, and a side that cannot
+be to move (the other king in check) is refused. Admin → Board → **Recoveries
+this session** shows "side-to-move corrected from the clock" and "clock running
+for the side not to move" when either has happened. Regression scenarios:
+`node tools/engine-selftest.js .` (clock seen ticking corrects a guessed side
+to move) and `node tools/clock-selftest.js .` (section 15).
 
 **Which overlay is on air?** The server only ever serves `public/display.html`,
 so the legacy file can only reach OBS as a **Local file** source. Opened that

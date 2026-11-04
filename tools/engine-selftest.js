@@ -315,7 +315,67 @@ scenario("a search that throws costs one poll, not the game", () => {
   return alive;
 });
 
-/* 14. A DISPLAY RELOAD (OBS source refresh). The move list cannot be rebuilt
+/* 14. THE "X TO MOVE" DRIFT (24 Oct 2026 meet): an adopted position's side to
+       move is a guess, and a wrong one put "Black to move" on air with white to
+       play and sent every later move through the retry path. The RabbitConnect
+       feed can see which clock is running; livechess.js passes that in as
+       noteClockSide. While the turn is UNCERTAIN a disagreeing clock corrects
+       it at once — the indicator is right at the press, not after the next
+       move. Once a real move has fixed the turn the clock may NOT override it
+       (a player who forgot to press); the disagreement is only counted. */
+scenario("clock seen ticking corrects a guessed side to move", () => {
+  const env = load();
+  const all = P(["e4", "e5", "Nf3", "Nc6", "Bb5"]);
+  push(env, all[3], 1);                                   // joined after 1.e4 e5 2.Nf3 — BLACK to move
+  const st0 = env.SCC.moves.gameStatus();
+  const setup = !st0.turn_certain && env.game.toMove === "w";
+  console.log(`  ${setup ? "PASS" : "FAIL"}  (setup) joined mid-game: turn uncertain, inherited guess is WHITE (wrong)`);
+  const fixed = env.SCC.moves.noteClockSide("b");
+  const st1 = env.SCC.moves.gameStatus();
+  const d = env.SCC.moves.diag;
+  const corrected = fixed === true && env.game.toMove === "b" && st1.turn === "b" && st1.turn_certain === true && d.turnFixes === 1;
+  console.log(`  ${corrected ? "PASS" : "FAIL"}  feed sees BLACK's clock running → black to move, certain (toMove=${env.game.toMove} turnFixes=${d.turnFixes})`);
+  const again = env.SCC.moves.noteClockSide("b");
+  const idem = again === false && d.turnFixes === 1 && d.turnDisputes === 0;
+  console.log(`  ${idem ? "PASS" : "FAIL"}  same side on the next poll → nothing to do, nothing counted`);
+  push(env, all[4], 1);                                   // 2...Nc6 lands
+  const tracked = env.game.moves.join(" ") === "Nc6" && env.game.fen.split(" ")[0] === all[4] && d.unexplained === 0;
+  console.log(`  ${tracked ? "PASS" : "FAIL"}  ...Nc6 tracked as BLACK's move, not held [${env.game.moves.join(" ")}]`);
+  // a real move made the turn CERTAIN: the clock may not override it now
+  const overridden = env.SCC.moves.noteClockSide("b");     // white to move; black's clock running (forgot to press)
+  const kept = overridden === false && env.game.toMove === "w" && env.SCC.moves.gameStatus().turn_certain === true
+    && d.turnDisputes === 1 && d.turnFixes === 1;
+  console.log(`  ${kept ? "PASS" : "FAIL"}  turn certain, clock disagrees → turn kept, disagreement counted (turnDisputes=${d.turnDisputes})`);
+  push(env, all[5], 1);                                   // 3.Bb5 lands regardless
+  return setup && corrected && idem && tracked && kept
+    && report(env, all[5], "tracking continues after the dispute");
+});
+
+/* 15. ...and the clock may not put an impossible side to move on the engine:
+       with the other king standing in check that side cannot be to move. Staged
+       through a settled desync (the pieces rearranged into an unrelated game
+       where black stands in check) so the position is ADOPTED, which is where
+       the turn becomes a guess. */
+scenario("clock never adopts a side that cannot be to move", () => {
+  const env = load();
+  for (const p of P(["e4", "e5"])) push(env, p, 1);       // a game under way
+  // 1.d4 d5 2.c4 e6 3.Nc3 Bb4 4.Qa4+ — unreachable from 1.e4 e5; black in check
+  const all = P(["d4", "d5", "c4", "e6", "Nc3", "Bb4", "Qa4"]);
+  push(env, all[7], 8);                                   // > resync_ms of idle polls → adopted
+  const st0 = env.SCC.moves.gameStatus();
+  const setup = env.game.fen.split(" ")[0] === all[7] && !st0.turn_certain && env.game.toMove === "b";
+  console.log(`  ${setup ? "PASS" : "FAIL"}  (setup) adopted with black in check → black to move, still uncertain (toMove=${env.game.toMove} certain=${st0.turn_certain})`);
+  const r = env.SCC.moves.noteClockSide("w");             // the clock says white — impossible here
+  const d = env.SCC.moves.diag;
+  const refused = r === false && env.game.toMove === "b" && d.turnFixes === 0 && d.turnDisputes === 1;
+  console.log(`  ${refused ? "PASS" : "FAIL"}  white's clock running while black is in check → refused, counted (turnDisputes=${d.turnDisputes})`);
+  const ignored = env.SCC.moves.noteClockSide(null) === false && env.SCC.moves.noteClockSide("white") === false
+    && d.turnDisputes === 1 && d.turnFixes === 0;
+  console.log(`  ${ignored ? "PASS" : "FAIL"}  null / unknown values are ignored outright`);
+  return setup && refused && ignored;
+});
+
+/* 16. A DISPLAY RELOAD (OBS source refresh). The move list cannot be rebuilt
        from one placement, so it is restored from the snapshot when the board is
        standing in exactly the position we last showed. */
 const asyncResults = (async () => {
@@ -348,7 +408,7 @@ const asyncResults = (async () => {
   const noStale = other.game.moves.length === 0 && other.game.fen.split(" ")[0] === elsewhere;
   console.log(`  ${noStale ? "PASS" : "FAIL"}  a different position adopts fresh (no stale history)`);
 
-  /* 15. BOARD OFFLINE AT BOOT. LiveChess has lost the e-Board and the display
+  /* 17. BOARD OFFLINE AT BOOT. LiveChess has lost the e-Board and the display
          reloads (or the OBS source is refreshed): no real placement arrives,
          only INACTIVE stand-ins, which livechess.js never passes on. The last
          shown position, moves and clock values must come back from the snapshot

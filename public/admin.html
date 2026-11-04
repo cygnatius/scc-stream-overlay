@@ -552,7 +552,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         <div class="row"><span class="k">Moves recorded</span><span class="v">{{ beatOk ? st.moves : '—' }}</span></div>
         <div class="row" v-if="boardDiag.d"><span class="k">Engine position</span><span class="v mono">{{ boardDiag.d.engine_placement || '—' }}</span></div>
         <div class="row" v-if="boardDiag.d"><span class="k">Physical board</span><span class="v mono" :class="{bad: boardDiag.mismatch}">{{ boardDiag.d.board_placement || '—' }}</span></div>
-        <div class="row" v-if="boardDiag.d"><span class="k">Recoveries this session</span><span class="v">{{ boardDiag.d.resyncs }} automatic · {{ boardDiag.d.forced }} manual · {{ boardDiag.d.deep_hits }} gaps reconstructed · {{ boardDiag.d.unexplained }} positions held</span></div>
+        <div class="row" v-if="boardDiag.d"><span class="k">Recoveries this session</span><span class="v">{{ boardDiag.d.resyncs }} automatic · {{ boardDiag.d.forced }} manual · {{ boardDiag.d.deep_hits }} gaps reconstructed · {{ boardDiag.d.unexplained }} positions held<span v-if="boardDiag.d.turn_fixes"> · {{ boardDiag.d.turn_fixes }} side-to-move corrected from the clock</span><span v-if="boardDiag.d.turn_disputes"> · {{ boardDiag.d.turn_disputes }} clock running for the side not to move</span></span></div>
         <div class="row"><span class="k">Feed</span><span class="v" :class="feedDiag.cls">{{ feedDiag.label }}</span></div>
         <div class="row" v-if="clockDiag"><span class="k">Clock feed</span><span class="v mono">{{ clockDiag }}</span></div>
         <div class="row" v-if="feedDiag.d"><span class="k">Board in LiveChess</span><span class="v mono" :class="{bad: st && st.board_online === false}">{{ boardStateLabel }}</span></div>
@@ -567,7 +567,9 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         <b>Resync</b> keeps the move list and just corrects the position — use it the moment the board on screen stops matching the table.
         <b>New game</b> clears the move list and starts fresh from the current pieces. Both act within one poll interval.
         Both use the <b>last position LiveChess delivered from the board</b> — if LiveChess has lost the board (INACTIVE above), there is
-        nothing new to adopt: get the board back first (power, Bluetooth / RabbitConnect, then LiveChess).
+        nothing new to adopt. The board has <b>one port and only one program can hold it</b>: while RabbitConnect is open it has the
+        board and LiveChess gets nothing. Either close RabbitConnect and restart LiveChess, or keep RabbitConnect and run
+        <b>start-rabbit-feed.bat</b> with the manual host override above set to <b>127.0.0.1:1983</b>.
       </p>
 
       <div class="savebar">
@@ -1140,7 +1142,8 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       </div>
       <p class="hint" style="margin-top:10px">
         Display status: <b>{{ pmStatusLabel }}</b><br>
-        The token needs a plain READ grant on the association (facet left blank) — a narrowed grant makes the overlay look broken on air. Token is a credential: it is masked here, never logged, and <code>config/*.json</code> is gitignored.
+        The token must be an <b>association</b> token, minted on the Pairingsman server (Forge → Run Command) with <code>php artisan api:association-token "Shepparton Chess Club"</code>; it reads that association and everything beneath it.
+        A personal token from <code>php artisan api:token</code> works everywhere else in the API but is answered 404 here, so every entity looks "not found" — the status above says so when that is the case. Token is a credential: it is masked here, never logged, and <code>config/*.json</code> is gitignored.
       </p>
       <div class="savebar">
         <span class="dirty" v-if="dirty.pm">Unsaved changes</span>
@@ -1157,7 +1160,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
       <div class="btns" style="margin-bottom:12px">
         <button class="ghost" @click="fetchPmPreview">Fetch preview</button>
         <span class="hint" style="align-self:center" v-if="pmPreview">
-          {{ {loading:'fetching…', ok:'payload received', unconfigured:'not configured yet', notfound:'not found or not visible to this token', denied:'token rejected', unreachable:'unreachable (offline, wrong URL, or CORS not allowed yet)', error:'server error'}[pmPreview.status] }}
+          {{ {loading:'fetching…', ok:'payload received', unconfigured:'not configured yet', notfound:'not found or not visible to this token', usertoken:'wrong kind of token — a personal token; the broadcast API needs an association token (php artisan api:association-token)', denied:'token rejected', unreachable:'unreachable (offline, wrong URL, or CORS not allowed yet)', error:'server error'}[pmPreview.status] }}
         </span>
       </div>
       <table class="ttable">
@@ -2432,7 +2435,14 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         headers: { Authorization: "Bearer " + p.token, Accept: "application/json" },
         cache: "no-store",
       });
-      if (r.status === 404) { state.pmPreview = { status: "notfound" }; return; }
+      if (r.status === 404) {
+        // A personal token (api:token) is answered 404 on the broadcast routes,
+        // which take only an association token — tell that apart from a wrong
+        // id the same way the display does: a user token can read /api/user.
+        let user = false;
+        try { user = (await fetch(base + "/api/user", { headers: { Authorization: "Bearer " + p.token, Accept: "application/json" }, cache: "no-store" })).status === 200; } catch (e) { }
+        state.pmPreview = { status: user ? "usertoken" : "notfound" }; return;
+      }
       if (r.status === 401 || r.status === 403) { state.pmPreview = { status: "denied" }; return; }
       if (!r.ok) { state.pmPreview = { status: "error" }; return; }
       const j = await r.json();
@@ -2576,6 +2586,7 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
           live: "live — " + p.entity + (age != null ? ", refreshed " + age + "s ago" : ""),
           stale: "refresh failing — last good data held on screen" + (age != null ? " (from " + age + "s ago)" : ""),
           notfound: "not found or not visible to this token — check the entity id and the token's grant",
+          usertoken: "WRONG KIND OF TOKEN — this is a personal token (api:token), and the broadcast API accepts only an association token. On the Pairingsman server run  php artisan api:association-token \"Shepparton Chess Club\"  and paste the result above",
           denied: "token rejected (revoked or wrong token) — display holds last good data",
         })[p.status] || p.status;
       });
@@ -2658,12 +2669,15 @@ code{background:var(--panel-2);padding:1px 6px;border-radius:4px;font-size:13px}
         return { d, label: secs == null ? "waiting for the first board message" : "live, last board message " + secs + "s ago", cls: "ok" };
       });
 
-      // Raw clock feed line. The side to move ticks; `run` is shown so the
-      // operator can see what the board sends, but it is not obeyed.
+      // Raw clock feed line. With the RabbitConnect feed the clock it SEES
+      // ticking is obeyed (`ticking`); with LiveChess the side to move ticks.
+      // `run` is shown so the operator can see what the board sends, but it is
+      // not obeyed.
       const clockDiag = computed(() => {
         const c = state.st && state.st.feed && state.st.feed.clock;
         if (!beatOk.value || !c) return "";
         return "white " + c.w + " · black " + c.b
+          + (c.ticking !== undefined ? " · feed sees " + (c.ticking === "w" ? "white" : c.ticking === "b" ? "black" : "neither") + " ticking" : "")
           + " · run " + JSON.stringify(c.run) + " (" + c.run_type + ", shown only — not obeyed)"
           + " · ticking " + (c.side === "w" ? "white" : c.side === "b" ? "black" : "nobody")
           + " (" + c.from + ")";
