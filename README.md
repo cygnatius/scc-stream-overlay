@@ -1,5 +1,13 @@
 # Shepparton Chess Club — Stream Overlay
 
+> **This overlay now lives in Pairingsman.** Since 5 November 2026 Pairingsman
+> serves it per club (Club pages → Play → Studio), talks to DGT and Chessnut
+> boards itself (no DGT LiveChess or RabbitConnect), and streams to YouTube,
+> Facebook, Twitch and others without OBS. The code is in the Pairingsman
+> repository under `resources/studio`, unchanged; make changes there. This
+> repository stays as the record of how it got here, and still works on its
+> own with `start-overlay.bat` for anyone not using Pairingsman.
+
 Broadcast overlay for streaming club chess games, rendered by OBS from a tiny
 local web server. It shows the live board, clocks, move list, player cards,
 a six-scene broadcast flow (start / versus / game / postgame / intermission /
